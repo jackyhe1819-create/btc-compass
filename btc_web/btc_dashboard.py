@@ -2151,12 +2151,41 @@ def _cached_translate(text: str) -> str:
         return text
 
 
+def _bb_signed_headers(method: str, path: str, query: dict = None, body=None) -> dict:
+    """为 BlockBeats v2 API 生成 HMAC-SHA256 签名头。"""
+    import hashlib, hmac, time as _time, string, random, json as _json
+
+    APP_KEY = "bb_demo_app"
+    APP_SECRET = "bb_demo_secret_2026_01"
+
+    timestamp = str(int(_time.time() * 1000))
+    nonce = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(16))
+    method_upper = method.upper()
+
+    if method_upper == "GET":
+        keys = sorted((query or {}).keys())
+        canonical = "&".join(f"{k}={query[k] if query[k] is not None else ''}" for k in keys) if keys else ""
+    else:
+        canonical = hashlib.md5(_json.dumps(body).encode()).hexdigest() if body else ""
+
+    string_to_sign = f"{method_upper}|{path}|{timestamp}|{nonce}|{canonical}"
+    signature = hmac.new(APP_SECRET.encode(), string_to_sign.encode(), hashlib.sha256).hexdigest()
+
+    return {
+        "X-App-Key": APP_KEY,
+        "X-Timestamp": timestamp,
+        "X-Nonce": nonce,
+        "X-Signature": signature,
+        "X-Encrypt": "0",
+    }
+
+
 def fetch_crypto_news(limit: int = 20) -> list:
     """
     获取律动 BlockBeats 快讯 - 最近 36 小时内容，支持分页滚动
-    - 数据源: 律动 BlockBeats Flash API（分页拉取，每页最多 20 条）
-    - 按发布时间排序，最新在前
-    - 自动翻页直到覆盖 36 小时，最多 15 页（~300 条）
+    - 数据源: BlockBeats v2 签名 API（/v2/newsflash/detective）
+    - 一次拉取 50 条（覆盖约 48h+），按发布时间排序，最新在前
+    - 自动过滤 36 小时以外的条目
     """
     import re
     from datetime import datetime, timedelta, timezone
@@ -2169,62 +2198,59 @@ def fetch_crypto_news(limit: int = 20) -> list:
     cutoff_ts = int(cutoff.timestamp())
 
     news_list = []
-    page = 1
-    max_pages = 15
 
     try:
-        while page <= max_pages:
-            response = requests.get(
-                "https://api.theblockbeats.news/v1/open-api/open-flash",
-                params={"size": 20, "page": page, "type": "push", "lang": "cn"},
-                timeout=15,
-                headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
-            )
-            if response.status_code != 200:
-                break
+        query = {"limit": "50"}
+        sign_path = "/v2/newsflash/detective"
+        signed = _bb_signed_headers("GET", sign_path, query)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+            "Accept": "application/json",
+            **signed,
+        }
+        response = requests.get(
+            "https://api.blockbeats.cn/v2/newsflash/detective",
+            params=query,
+            headers=headers,
+            timeout=15,
+            verify=False,
+        )
+        if response.status_code != 200:
+            print(f"⚠️ BlockBeats v2 API HTTP {response.status_code}")
+            return news_list
 
-            data = response.json()
-            items = data.get("data", {}).get("data", [])
-            if not items:
-                break
+        data = response.json()
+        items = data.get("data", [])
+        if not isinstance(items, list):
+            items = []
 
-            reached_cutoff = False
-            for item in items:
-                # API 返回的时间字段是 create_time（字符串时间戳）
-                create_time = item.get("create_time", 0)
-                try:
-                    ts = int(create_time)
-                except (TypeError, ValueError):
-                    ts = 0
+        _tz8 = timezone(timedelta(hours=8))
+        for item in items:
+            ts = int(item.get("add_time", 0) or 0)
+            if ts and ts < cutoff_ts:
+                continue
 
-                if ts and ts < cutoff_ts:
-                    reached_cutoff = True
-                    break
+            title = (item.get("title") or "").strip()
+            content = clean_html(item.get("content") or item.get("abstract") or "")
+            if not title:
+                continue
 
-                title = item.get("title", "").strip()
-                content = clean_html(item.get("content", ""))
-                if not title:
-                    continue
-
-                _tz8 = timezone(timedelta(hours=8))
-                pub = datetime.fromtimestamp(ts, tz=_tz8) if ts else datetime.now(_tz8)
-                url = item.get("link") or f"https://www.theblockbeats.info/flash/{item.get('id', '')}"
-                news_list.append({
-                    "title": title,
-                    "url": url,
-                    "source": "律动 BlockBeats",
-                    "icon": "⚡",
-                    "summary": content,
-                    "time": pub.strftime("%m-%d %H:%M"),
-                    "_ts": ts,
-                })
-
-            if reached_cutoff:
-                break
-            page += 1
+            pub = datetime.fromtimestamp(ts, tz=_tz8) if ts else datetime.now(_tz8)
+            article_id = item.get("article_id") or item.get("id", "")
+            url = f"https://www.theblockbeats.info/flash/{article_id}"
+            news_list.append({
+                "title": title,
+                "url": url,
+                "source": "律动 BlockBeats",
+                "icon": "⚡",
+                "summary": content,
+                "time": pub.strftime("%m-%d %H:%M"),
+                "_ts": ts,
+            })
 
     except Exception as e:
         print(f"⚠️ BlockBeats Flash API 失败: {e}")
+        import traceback; traceback.print_exc()
 
     # 按时间排序（最新在前），移除内部字段
     news_list.sort(key=lambda x: x.get("_ts", 0), reverse=True)
