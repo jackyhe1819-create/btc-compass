@@ -3866,18 +3866,18 @@ def calculate_total_score(indicators: Dict[str, IndicatorResult]) -> Tuple[float
     else:
         normalized_score = 0
             
-    # 生成建议
-    if normalized_score >= 0.8:
+    # 生成建议 (阈值采用斐波那契黄金分割: 0.618 / 0.382 / 0.146)
+    if normalized_score >= 0.618:
         recommendation = "强烈买入 (Strong Buy)"
-    elif normalized_score >= 0.4:
+    elif normalized_score >= 0.382:
         recommendation = "买入 (Buy)"
-    elif normalized_score >= 0.1:
+    elif normalized_score >= 0.146:
         recommendation = "增持 (Accumulate)"
-    elif normalized_score >= -0.1:
+    elif normalized_score >= -0.146:
         recommendation = "持有/观望 (Hold)"
-    elif normalized_score >= -0.4:
+    elif normalized_score >= -0.382:
         recommendation = "减仓 (Reduce)"
-    elif normalized_score >= -0.8:
+    elif normalized_score >= -0.618:
         recommendation = "卖出 (Sell)"
     else:
         recommendation = "清仓 (Strong Sell)"
