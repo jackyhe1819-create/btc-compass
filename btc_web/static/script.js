@@ -1036,16 +1036,15 @@ function renderCryptoNews(news) {
 
     const items = news.map(item => {
         const summary = item.summary ? item.summary.trim() : '';
-        return `<div style="padding:9px 4px; border-bottom:1px solid rgba(255,255,255,0.05);">
-            <div style="display:flex; align-items:flex-start; gap:6px; margin-bottom:${summary ? '5px' : '0'};">
-                <span style="font-size:0.75rem; flex-shrink:0; margin-top:1px;">⚡</span>
-                <a href="${item.url}" target="_blank" rel="noopener noreferrer"
-                   style="flex:1; font-size:0.855rem; font-weight:500; color:#e8a832; text-decoration:none; line-height:1.4;">
+        return `<div class="news-flash-item${summary ? ' has-summary' : ''}">
+            <div class="news-flash-head">
+                <span class="news-flash-bolt">⚡</span>
+                <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="news-flash-title">
                     ${item.title}
                 </a>
-                <span style="font-size:0.67rem; color:#555; white-space:nowrap; flex-shrink:0; margin-top:2px;">${item.time}</span>
+                <span class="news-flash-time">${item.time}</span>
             </div>
-            ${summary ? `<div style="font-size:0.8rem; color:#888; line-height:1.55; padding-left:18px;">${summary}</div>` : ''}
+            ${summary ? `<div class="news-flash-summary"><div class="news-flash-summary-inner">${summary}</div></div>` : ''}
         </div>`;
     }).join('');
 

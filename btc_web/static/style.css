@@ -1676,6 +1676,87 @@ body::before {
     background-color: rgba(247, 147, 26, 0.7);
 }
 
+/* ============================================================
+   Block 资讯聚合 - hover 展开摘要
+   ============================================================ */
+.news-flash-item {
+    padding: 9px 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    transition: background-color 0.18s ease;
+}
+
+.news-flash-item.has-summary {
+    cursor: default;
+}
+
+.news-flash-item.has-summary:hover {
+    background-color: rgba(247, 147, 26, 0.04);
+}
+
+.news-flash-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.news-flash-bolt {
+    font-size: 0.75rem;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.news-flash-title {
+    flex: 1;
+    font-size: 0.855rem;
+    font-weight: 500;
+    color: #e8a832;
+    text-decoration: none;
+    line-height: 1.4;
+}
+
+.news-flash-item.has-summary .news-flash-title::after {
+    content: " ▾";
+    font-size: 0.65rem;
+    color: #555;
+    margin-left: 4px;
+    transition: color 0.18s ease;
+}
+
+.news-flash-item.has-summary:hover .news-flash-title::after {
+    color: #f7931a;
+}
+
+.news-flash-time {
+    font-size: 0.67rem;
+    color: #555;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+/* 摘要默认折叠 - 使用 grid 行高 0 动画(无 max-height 估值问题) */
+.news-flash-summary {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease;
+    opacity: 0;
+    margin-top: 0;
+}
+
+.news-flash-item:hover .news-flash-summary {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    margin-top: 5px;
+}
+
+.news-flash-summary-inner {
+    overflow: hidden;
+    font-size: 0.8rem;
+    color: #aaa;
+    line-height: 1.55;
+    padding-left: 18px;
+}
+
 /* Short-term & Aux indicator grids */
 .cards-container {
     display: grid;
