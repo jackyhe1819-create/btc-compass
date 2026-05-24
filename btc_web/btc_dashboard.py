@@ -2180,18 +2180,42 @@ def _bb_signed_headers(method: str, path: str, query: dict = None, body=None) ->
     }
 
 
+def _bb_fetch_flash_detail(article_id) -> str:
+    """拉取单条快讯正文（HTML），失败返回空串。"""
+    if not article_id:
+        return ""
+    try:
+        query = {"article_id": str(article_id)}
+        signed = _bb_signed_headers("GET", "/v2/newsflash/detail", query)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+            "Accept": "application/json",
+            **signed,
+        }
+        r = requests.get(
+            "https://api.blockbeats.cn/v2/newsflash/detail",
+            params=query, headers=headers, timeout=8, verify=False,
+        )
+        if r.status_code != 200:
+            return ""
+        return (r.json().get("data") or {}).get("content") or ""
+    except Exception:
+        return ""
+
+
 def fetch_crypto_news(limit: int = 20) -> list:
     """
-    获取律动 BlockBeats 快讯 - 最近 36 小时内容，支持分页滚动
-    - 数据源: BlockBeats v2 签名 API（/v2/newsflash/detective）
-    - 一次拉取 50 条（覆盖约 48h+），按发布时间排序，最新在前
-    - 自动过滤 36 小时以外的条目
+    获取律动 BlockBeats 快讯 - 最近 36 小时内容
+    - 列表数据源: /v2/newsflash/detective（只有标题）
+    - 正文数据源: /v2/newsflash/detail（并发拉取，逐条带回 content）
+    - 自动过滤 36 小时以外的条目，按发布时间倒序
     """
     import re
     from datetime import datetime, timedelta, timezone
+    from concurrent.futures import ThreadPoolExecutor
 
     def clean_html(text: str) -> str:
-        clean = re.sub(r'<[^>]+>', '', text or '')
+        clean = re.sub(r'<[^>]+>', '', text or '').strip()
         return clean[:200] + '...' if len(clean) > 200 else clean
 
     cutoff = datetime.now() - timedelta(hours=36)
@@ -2225,25 +2249,38 @@ def fetch_crypto_news(limit: int = 20) -> list:
             items = []
 
         _tz8 = timezone(timedelta(hours=8))
+
+        # 第一轮: 过滤窗口内的条目，记录 article_id
+        prelim = []  # (article_id, title, ts)
         for item in items:
             ts = int(item.get("add_time", 0) or 0)
             if ts and ts < cutoff_ts:
                 continue
-
             title = (item.get("title") or "").strip()
-            content = clean_html(item.get("content") or item.get("abstract") or "")
             if not title:
                 continue
-
-            pub = datetime.fromtimestamp(ts, tz=_tz8) if ts else datetime.now(_tz8)
             article_id = item.get("article_id") or item.get("id", "")
-            url = f"https://www.theblockbeats.info/flash/{article_id}"
+            prelim.append((article_id, title, ts, item))
+
+        # 第二轮: 并发拉取每条正文
+        ids_to_fetch = [aid for aid, _, _, _ in prelim if aid]
+        details_map = {}
+        if ids_to_fetch:
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                results = pool.map(_bb_fetch_flash_detail, ids_to_fetch)
+                for aid, content in zip(ids_to_fetch, results):
+                    details_map[str(aid)] = content
+
+        for aid, title, ts, raw in prelim:
+            pub = datetime.fromtimestamp(ts, tz=_tz8) if ts else datetime.now(_tz8)
+            url = f"https://www.theblockbeats.info/flash/{aid}"
+            content_html = details_map.get(str(aid), "") or raw.get("content") or raw.get("abstract") or ""
             news_list.append({
                 "title": title,
                 "url": url,
                 "source": "律动 BlockBeats",
                 "icon": "⚡",
-                "summary": content,
+                "summary": clean_html(content_html),
                 "time": pub.strftime("%m-%d %H:%M"),
                 "_ts": ts,
             })
