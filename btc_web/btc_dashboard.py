@@ -2205,10 +2205,10 @@ def _bb_fetch_flash_detail(article_id) -> str:
 
 def fetch_crypto_news(limit: int = 20) -> list:
     """
-    获取律动 BlockBeats 快讯 - 最近 36 小时内容
+    获取律动 BlockBeats 快讯 - 最近 72 小时内容
     - 列表数据源: /v2/newsflash/detective（只有标题）
     - 正文数据源: /v2/newsflash/detail（并发拉取，逐条带回 content）
-    - 自动过滤 36 小时以外的条目，按发布时间倒序
+    - 自动过滤 72 小时以外的条目，按发布时间倒序
     """
     import re
     from datetime import datetime, timedelta, timezone
@@ -2218,7 +2218,7 @@ def fetch_crypto_news(limit: int = 20) -> list:
         clean = re.sub(r'<[^>]+>', '', text or '').strip()
         return clean[:200] + '...' if len(clean) > 200 else clean
 
-    cutoff = datetime.now() - timedelta(hours=36)
+    cutoff = datetime.now() - timedelta(hours=72)
     cutoff_ts = int(cutoff.timestamp())
 
     news_list = []

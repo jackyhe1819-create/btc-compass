@@ -1031,7 +1031,7 @@ function renderCryptoNews(news) {
     if (!container) return;
 
     const countBadge = `<div style="font-size:0.7rem; color:#555; padding:4px 4px 8px; border-bottom:1px solid rgba(255,255,255,0.06); margin-bottom:4px; flex-shrink:0;">
-        共 ${news.length} 条 · 最近 36 小时
+        共 ${news.length} 条 · 最近 72 小时
     </div>`;
 
     const items = news.map(item => {
