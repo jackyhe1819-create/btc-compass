@@ -16,7 +16,7 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>₿</text></svg>">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=21-summary">
     <!-- 防止主题闪烁：在 CSS 加载前立即恢复主题（v2: 默认米白色） -->
     <script>
         (function() {
@@ -531,7 +531,22 @@
             Bitcoin 开发者动态
             <span style="font-size: 0.75rem; color: #888; font-weight: normal; margin-left: 10px;">Optech · Delving Bitcoin · Dev Mailing List · Blockstream</span>
             <span id="buildersUpdatedAt" style="font-size: 0.72rem; color: #555; font-weight: normal; margin-left: 12px;"></span>
+            <button id="buildersRefreshBtn" class="builders-refresh-btn" title="重新拉取 RSS 并生成摘要">⟳</button>
         </h2>
+
+        <!-- AI 摘要可折叠面板（默认收起）-->
+        <details id="buildersSummaryPanel" class="builders-summary-panel">
+            <summary class="builders-summary-toggle">
+                <span class="bs-icon">🤖</span>
+                <span class="bs-label">本期开发要点摘要</span>
+                <span id="buildersSummaryMeta" class="bs-meta"></span>
+                <span class="bs-chev">▾</span>
+            </summary>
+            <div id="buildersSummaryBody" class="builders-summary-body">
+                <p style="color:#888;font-size:0.85rem;">摘要加载中…</p>
+            </div>
+        </details>
+
         <div class="builders-grid" id="buildersGrid">
             <p style="color: #888; font-size: 0.9rem;">加载中...</p>
         </div>
@@ -731,7 +746,7 @@
         <p style="margin: 6px 0 0 0; font-size: 0.75rem; color: #666;">点击地址即可复制</p>
     </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}?v=19"></script>
+    <script src="{{ url_for('static', filename='script.js') }}?v=20-summary"></script>
 </body>
 
 </html>

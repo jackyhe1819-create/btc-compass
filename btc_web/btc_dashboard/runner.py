@@ -1,0 +1,503 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+btc_dashboard.runner
+====================
+评分汇总、sparkline 计算、并发执行所有指标、开发者动态 RSS。
+"""
+
+import pandas as pd
+import numpy as np
+import requests
+from datetime import datetime, timedelta, timezone
+from typing import Tuple, Dict, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from .core import (
+    IndicatorResult, DashboardResult,
+    GENESIS_DATE, HALVING_DATES, NEXT_HALVING_ESTIMATE,
+    POWER_LAW_INTERCEPT, POWER_LAW_SLOPE,
+    AHR999_A, AHR999_B,
+    fetch_realtime_btc_price, fetch_btc_data,
+)
+from .indicators_long import (
+    calc_two_year_ma_multiplier, calc_200w_ma_heatmap, calc_golden_ratio_multiplier,
+    calc_pi_cycle, calc_lth_supply, calc_hashrate, calc_balanced_price,
+    calc_halving_cycle, calc_ahr999, calc_power_law, calc_mayer_multiple,
+)
+from .indicators_short import calc_rsi, calc_macd, calc_bollinger_bands
+from .indicators_aux import (
+    calc_fear_greed_index, calc_funding_rate, calc_long_short_ratio,
+    calc_btc_dominance, calc_etf_flow, calc_mnav, calc_company_holdings,
+    calc_exchange_reserve, calc_max_pain,
+)
+# 历史数据函数（sparkline 用，部分指标无法从 df 推导，回退至 API）
+from .history import (
+    get_fear_greed_history, get_funding_rate_history_okx,
+    get_long_short_history, get_hashrate_history, get_mnav_history,
+    get_etf_history, get_max_pain_history, get_company_holdings_history,
+    get_lth_cdd_history,
+)
+
+
+# ============================================================
+# 评分权重
+# ============================================================
+
+# 权重配置 (长周期偏置 · 适合大周期长期决策)
+WEIGHTS = {
+    # ═══ 长期周期指标 65% (顶底定位核心) ═══
+    "Pi Cycle Top": 0.10,
+    "200-Week Heatmap": 0.10,
+    "Mayer Multiple": 0.09,
+    "2-Year MA Mult": 0.08,
+    "Ahr999": 0.08,
+    "幂律走廊": 0.08,
+    "Golden Ratio": 0.07,
+    "减半周期": 0.05,
+    # ═══ 结构/链上指标 27% (LTH 行为 + 供需) ═══
+    "长期持有者(CDD)": 0.10,
+    "均衡价格": 0.05,
+    "交易所余额": 0.04,
+    "ETF资金流": 0.03,
+    "BTC市占率": 0.02,
+    "全网算力": 0.02,
+    "MSTR mNAV": 0.01,
+    "公司持仓": 0.00,
+    # ═══ 短期指标 8% (仅极端情绪反向确认) ═══
+    "恐惧贪婪指数": 0.05,
+    "RSI(14)": 0.02,
+    "MACD": 0.01,
+    "布林带": 0.00,
+    "资金费率": 0.00,
+    "多空比": 0.00,
+    "最大痛点": 0.00,
+}  # 总和 = 1.00 (100%)
+
+
+def calculate_total_score(indicators: Dict[str, IndicatorResult]) -> Tuple[float, str]:
+    """计算加权总分"""
+    total = 0
+    weight_sum = 0
+    
+    for name, result in indicators.items():
+        # 这里需要注意名字匹配：Calculator returns "长期持有者(CDD)"
+        if not np.isnan(result.value) and name in WEIGHTS:
+            total += WEIGHTS[name] * result.score
+            weight_sum += WEIGHTS[name]
+    
+    # 归一化
+    if weight_sum > 0:
+        normalized_score = total / weight_sum
+    else:
+        normalized_score = 0
+            
+    # 生成建议 (阈值采用斐波那契黄金分割: 0.618 / 0.382 / 0.146)
+    if normalized_score >= 0.618:
+        recommendation = "强烈买入 (Strong Buy)"
+    elif normalized_score >= 0.382:
+        recommendation = "买入 (Buy)"
+    elif normalized_score >= 0.146:
+        recommendation = "增持 (Accumulate)"
+    elif normalized_score >= -0.146:
+        recommendation = "持有/观望 (Hold)"
+    elif normalized_score >= -0.382:
+        recommendation = "减仓 (Reduce)"
+    elif normalized_score >= -0.618:
+        recommendation = "卖出 (Sell)"
+    else:
+        recommendation = "清仓 (Strong Sell)"
+        
+    return normalized_score, recommendation
+
+
+# ============================================================
+# 仪表盘显示
+# ============================================================
+
+def print_dashboard(result: DashboardResult):
+    """打印仪表盘"""
+    print("\n" + "=" * 60)
+    print("📊 BTC 长期指标仪表盘")
+    print("=" * 60)
+    print(f"更新时间: {result.timestamp.strftime('%Y-%m-%d %H:%M')}")
+    print(f"当前价格: ${result.btc_price:,.2f}")
+    print("-" * 60)
+    
+    # 综合评分条
+    score = result.total_score
+    bar_length = 30
+    position = int((score + 1) / 2 * bar_length)
+    bar = "━" * position + "●" + "━" * (bar_length - position - 1)
+    print(f"\n综合评分: {score:.2f}  {result.recommendation}")
+    print(f"  -1 [{bar}] +1")
+    
+    # 按优先级分组显示
+    print("\n" + "-" * 60)
+    print("🔴 P0 核心指标")
+    print("-" * 60)
+    for name, ind in result.indicators.items():
+        if ind.priority == "P0":
+            print(f"  {ind.color} {ind.name:15} | {ind.status}")
+    
+    print("\n" + "-" * 60)
+    print("🟡 P1 参考指标")
+    print("-" * 60)
+    for name, ind in result.indicators.items():
+        if ind.priority == "P1":
+            print(f"  {ind.color} {ind.name:15} | {ind.status}")
+    
+    print("\n" + "=" * 60)
+
+
+# ============================================================
+# 主函数
+# ============================================================
+
+def get_sparklines(df: pd.DataFrame, indicators: dict, days: int = 7) -> dict:
+    """
+    计算所有指标的最近 N 天迷你图数据，优先从 df 推导真实时序。
+    外部 API 类指标（无法从 df 推导）保留 score 重复值作 fallback。
+    """
+    sparklines = {}
+    recent = df.tail(days)
+    GENESIS = pd.Timestamp("2009-01-03")
+    HALVINGS = [
+        pd.Timestamp("2012-11-28"), pd.Timestamp("2016-07-09"),
+        pd.Timestamp("2020-05-11"), pd.Timestamp("2024-04-20"),
+    ]
+
+    # ── 预计算全局滚动序列（一次性，复用）──
+    ma14g  = df['price'].rolling(14).mean()
+    ma111  = df['price'].rolling(111).mean()
+    ma200  = df['price'].rolling(200).mean()
+    ma350  = df['price'].rolling(350).mean()
+    ma730  = df['price'].rolling(730).mean()
+    ma1400 = df['price'].rolling(1400).mean()
+    ma150  = df['price'].rolling(150).mean()
+
+    delta  = df['price'].diff()
+    gain   = delta.clip(lower=0).rolling(14).mean()
+    loss   = (-delta.clip(upper=0)).rolling(14).mean()
+    rsi_s  = 100 - (100 / (1 + gain / loss))
+
+    ema12  = df['price'].ewm(span=12).mean()
+    ema26  = df['price'].ewm(span=26).mean()
+    macd_s = ema12 - ema26
+
+    bb_mid = df['price'].rolling(20).mean()
+    bb_std = df['price'].rolling(20).std()
+    bb_upper = bb_mid + 2 * bb_std
+    bb_lower = bb_mid - 2 * bb_std
+    pct_b  = (df['price'] - bb_lower) / (bb_upper - bb_lower)
+
+    def _clean(series, idx, decimals=4):
+        vals = series.loc[idx].round(decimals).tolist()
+        return [None if (v != v or v is None) else v for v in vals]
+
+    for name in indicators:
+        try:
+            idx = recent.index
+
+            if name == "Ahr999":
+                dca_cost = np.exp(df['price'].tail(200).apply(np.log).mean())
+                vals = []
+                for ts, row in recent.iterrows():
+                    d = (ts - GENESIS).days
+                    if d > 0 and dca_cost > 0:
+                        fair = 10 ** (AHR999_B * np.log10(d) + AHR999_A)
+                        vals.append(round((row['price']/dca_cost)*(row['price']/fair), 4) if fair > 0 else None)
+                    else:
+                        vals.append(None)
+                sparklines[name] = [v for v in vals if v is not None]
+
+            elif name == "Mayer Multiple":
+                sparklines[name] = _clean(recent['price'] / ma200.loc[idx], idx, 3)
+
+            elif name == "RSI(14)":
+                sparklines[name] = _clean(rsi_s.loc[idx], idx, 1)
+
+            elif name == "MACD":
+                sparklines[name] = _clean(macd_s.loc[idx], idx, 2)
+
+            elif name == "布林带":
+                sparklines[name] = _clean(pct_b.loc[idx], idx, 4)
+
+            elif name == "Pi Cycle Top":
+                ma350x2 = ma350 * 2
+                gap_pct = ((ma350x2 - ma111) / ma350x2 * 100).loc[idx]
+                sparklines[name] = _clean(gap_pct, idx, 2)
+
+            elif name == "2-Year MA Mult":
+                # 价格 / MA730 倍数
+                mult = (recent['price'] / ma730.loc[idx])
+                sparklines[name] = _clean(mult, idx, 3)
+
+            elif name == "200-Week Heatmap":
+                # 价格偏离 MA1400 的百分比
+                pct = ((recent['price'] - ma1400.loc[idx]) / ma1400.loc[idx] * 100)
+                sparklines[name] = _clean(pct, idx, 2)
+
+            elif name == "Golden Ratio":
+                # 价格 / MA350 倍数
+                mult = (recent['price'] / ma350.loc[idx])
+                sparklines[name] = _clean(mult, idx, 3)
+
+            elif name == "幂律走廊":
+                vals = []
+                for ts, row in recent.iterrows():
+                    d = (ts - GENESIS).days
+                    if d > 0:
+                        fair = 10 ** (AHR999_B * np.log10(d) + AHR999_A)
+                        vals.append(round(row['price'] / fair, 4) if fair > 0 else None)
+                    else:
+                        vals.append(None)
+                sparklines[name] = [v for v in vals if v is not None]
+
+            elif name == "均衡价格":
+                balanced = (ma150 + ma350) / 2
+                ratio = (recent['price'] / balanced.loc[idx])
+                sparklines[name] = _clean(ratio, idx, 3)
+
+            elif name == "减半周期":
+                vals = []
+                for ts in idx:
+                    last_h = max((h for h in HALVINGS if h <= ts), default=HALVINGS[0])
+                    vals.append(round((ts - last_h).days / 30.44, 1))
+                sparklines[name] = vals
+
+            elif name == "恐惧贪婪指数":
+                h = get_fear_greed_history(days)
+                sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name == "资金费率":
+                h = get_funding_rate_history_okx(days)
+                sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name == "多空比":
+                h = get_long_short_history(days)
+                sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name == "全网算力":
+                h = get_hashrate_history(days)
+                sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name == "MSTR mNAV":
+                h = get_mnav_history(days=days)
+                sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name in ("ETF活跃度", "ETF资金流"):
+                h = get_etf_history(days=days)
+                sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name.startswith("最大痛点"):
+                h = get_max_pain_history(df, days=days)
+                sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name == "公司持仓":
+                # 直接用已计算的持仓量，避免重复调用 CoinGecko API
+                holdings_val = indicators[name].value
+                if holdings_val and not np.isnan(holdings_val) and holdings_val > 0:
+                    btc_s = recent['price']
+                    sparklines[name] = [round(float(holdings_val) * float(p) / 1e9, 2) for p in btc_s.values]
+                else:
+                    h = get_company_holdings_history(df, days=days)
+                    sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name == "长期持有者(CDD)":
+                h = get_lth_cdd_history(days=days)
+                sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            else:
+                # 其余外部 API 类（ETF/公司持仓/交易所余额/市占率/最大痛点/长期持有者）
+                score = indicators[name].score if not np.isnan(indicators[name].value) else 0
+                sparklines[name] = [round(score, 2)] * days
+
+        except Exception as e:
+            print(f"⚠️ sparkline [{name}] 计算失败: {e}")
+            sparklines[name] = []
+
+    return sparklines
+
+
+def run_dashboard() -> DashboardResult:
+    """运行仪表盘分析 — 并行版本"""
+    # 获取历史数据（用于计算指标）
+    df = fetch_btc_data()
+
+    # 优先使用实时价格 API，失败则回退到历史数据最新价格
+    realtime_price = fetch_realtime_btc_price()
+    if realtime_price is not None:
+        current_price = realtime_price
+        df.iloc[-1, df.columns.get_loc('price')] = current_price
+    else:
+        current_price = df['price'].iloc[-1]
+        print("⚠️ 使用历史数据价格（非实时）")
+
+    indicators = {}
+
+    # === 第一步：快速计算本地 DataFrame 指标（纯计算，无网络IO） ===
+    indicators["Mayer Multiple"] = calc_mayer_multiple(df)
+    indicators["Pi Cycle Top"] = calc_pi_cycle(df)
+    indicators["减半周期"] = calc_halving_cycle()
+    indicators["Ahr999"] = calc_ahr999(df)
+    indicators["幂律走廊"] = calc_power_law(df)
+    indicators["2-Year MA Mult"] = calc_two_year_ma_multiplier(df)
+    indicators["200-Week Heatmap"] = calc_200w_ma_heatmap(df)
+    indicators["Golden Ratio"] = calc_golden_ratio_multiplier(df)
+    indicators["RSI(14)"] = calc_rsi(df)
+    indicators["MACD"] = calc_macd(df)
+    indicators["布林带"] = calc_bollinger_bands(df)
+    indicators["均衡价格"] = calc_balanced_price(df)
+
+    # === 第二步：并发执行网络 API 调用（IO密集，并行加速） ===
+    api_tasks = {
+        "恐惧贪婪指数": calc_fear_greed_index,
+        "资金费率": calc_funding_rate,
+        "多空比": calc_long_short_ratio,
+        "最大痛点": calc_max_pain,
+        "BTC市占率": calc_btc_dominance,
+        "ETF资金流": calc_etf_flow,
+        "MSTR mNAV": calc_mnav,
+        "公司持仓": calc_company_holdings,
+        "交易所余额": calc_exchange_reserve,
+        "全网算力": calc_hashrate,
+        "长期持有者(CDD)": calc_lth_supply,
+    }
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        future_to_name = {executor.submit(fn): name for name, fn in api_tasks.items()}
+        for future in as_completed(future_to_name):
+            name = future_to_name[future]
+            try:
+                indicators[name] = future.result(timeout=30)
+            except Exception as e:
+                print(f"⚠️ 指标 {name} 计算失败: {e}")
+                indicators[name] = IndicatorResult(
+                    name=name, value=float('nan'), score=0,
+                    color="gray", status="数据获取失败",
+                    priority="辅助", url="", description="", method=""
+                )
+
+    # 计算综合评分
+    total_score, recommendation = calculate_total_score(indicators)
+
+    result = DashboardResult(
+        timestamp=datetime.now(),
+        btc_price=current_price,
+        indicators=indicators,
+        total_score=total_score,
+        recommendation=recommendation
+    )
+
+    return result
+
+
+def fetch_builders_feed(limit: int = 30) -> dict:
+    """获取 Bitcoin 开发者社区 RSS 动态"""
+    import feedparser as _fp
+    import time as _t
+    import datetime as _dt
+    import re as _re
+
+    SOURCES = [
+        {
+            "key": "optech",
+            "name": "Bitcoin Optech",
+            "rss": "https://bitcoinops.org/feed.xml",
+            "icon": "📡",
+            "priority": "critical",
+        },
+        {
+            "key": "delving",
+            "name": "Delving Bitcoin",
+            "rss": "https://delvingbitcoin.org/latest.rss",
+            "icon": "🔍",
+            "priority": "critical",
+        },
+        {
+            "key": "devmail",
+            "name": "Bitcoin Dev Mailing List",
+            "rss": "https://gnusha.org/pi/bitcoindev/atom.xml",
+            "icon": "📬",
+            "priority": "high",
+        },
+        {
+            "key": "blockstream",
+            "name": "Blockstream Research",
+            "rss": "https://blog.blockstream.com/rss/",
+            "icon": "🔬",
+            "priority": "high",
+        },
+    ]
+
+    result = {"sources": [], "total": 0, "updated_at": ""}
+    all_items = []
+
+    for src in SOURCES:
+        try:
+            feed = _fp.parse(src["rss"])
+            items = []
+            for entry in feed.entries[:limit // len(SOURCES) + 2]:
+                # 统一时间格式
+                pub = ""
+                if hasattr(entry, "published_parsed") and entry.published_parsed:
+                    pub = _dt.datetime(*entry.published_parsed[:6]).strftime("%Y-%m-%d")
+                elif hasattr(entry, "updated_parsed") and entry.updated_parsed:
+                    pub = _dt.datetime(*entry.updated_parsed[:6]).strftime("%Y-%m-%d")
+
+                # 摘要截断
+                summary = ""
+                if hasattr(entry, "summary"):
+                    summary = _re.sub(r"<[^>]+>", "", entry.summary or "")[:200].strip()
+
+                items.append({
+                    "title": entry.get("title", "").strip(),
+                    "url": entry.get("link", ""),
+                    "date": pub,
+                    "summary": summary,
+                })
+
+            result["sources"].append({
+                "key": src["key"],
+                "name": src["name"],
+                "icon": src["icon"],
+                "priority": src["priority"],
+                "items": items,
+                "count": len(items),
+            })
+            all_items.extend(items)
+        except Exception as e:
+            result["sources"].append({
+                "key": src["key"],
+                "name": src["name"],
+                "icon": src["icon"],
+                "priority": src["priority"],
+                "items": [],
+                "count": 0,
+                "error": str(e),
+            })
+
+    result["total"] = len(all_items)
+    result["updated_at"] = _dt.datetime.now().strftime("%H:%M")
+
+    # 离线模板聚合摘要：关键词分类 + 跨源信号 + 高频词
+    try:
+        from .summarizer import summarize_builders_feed
+        result["summary"] = summarize_builders_feed(result)
+    except Exception as e:
+        print(f"⚠️ 开发者动态摘要生成失败: {e}")
+        result["summary"] = None
+
+    return result
+
+
+def main():
+    """入口函数"""
+    result = run_dashboard()
+    print_dashboard(result)
+    return result
+
+
+if __name__ == "__main__":
+    main()

@@ -12,6 +12,66 @@ const historyCache = {};        // { "Ahr999:30": {dates, values, thresholds} }
 let drawerChartInstance = null; // Chart.js instance
 let currentDrawerIndicator = null;
 
+// 通用 SWR 轮询 helper：处理 computing/202 + 指数退避
+// 用法: fetchWithComputingPoll('/api/dashboard', { onData, onBanner, onTimeout, pollKey: '_dashboardPollTimer' })
+async function fetchWithComputingPoll(url, opts) {
+    const {
+        onData,                           // (data) => void
+        onBanner = null,                  // () => void，首次进入 computing 时调用
+        onHideBanner = null,              // () => void，结束轮询时调用
+        onTimeout = null,                 // () => void
+        onError = null,                   // (err) => void
+        pollKey = '_pollTimer',           // window 上的句柄 key，防并发
+        maxWaitMs = 10 * 60 * 1000,       // 总等待上限（10 分钟）
+        delays = [8000, 16000, 30000, 30000, 30000],  // 指数退避序列
+    } = opts || {};
+
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.success) {
+            onData(data);
+            return;
+        }
+
+        if (data.computing) {
+            if (window[pollKey]) return;   // 已有轮询在跑
+            if (onBanner) onBanner();
+            const start = Date.now();
+            let attempt = 0;
+            const schedule = () => {
+                const delay = delays[Math.min(attempt, delays.length - 1)];
+                window[pollKey] = setTimeout(async () => {
+                    attempt++;
+                    if (Date.now() - start > maxWaitMs) {
+                        window[pollKey] = null;
+                        if (onHideBanner) onHideBanner();
+                        if (onTimeout) onTimeout();
+                        return;
+                    }
+                    try {
+                        const r = await fetch(url);
+                        const d = await r.json();
+                        if (d.success) {
+                            window[pollKey] = null;
+                            if (onHideBanner) onHideBanner();
+                            onData(d);
+                            return;
+                        }
+                    } catch (e) { /* 静默 */ }
+                    schedule();
+                }, delay);
+            };
+            schedule();
+            return;
+        }
+
+        if (onError) onError(data.error || 'API 返回失败');
+    } catch (e) {
+        if (onError) onError(e);
+    }
+}
+
 // Threshold reference lines for key indicators
 const INDICATOR_THRESHOLDS = {
     "Ahr999": [
@@ -117,16 +177,20 @@ document.getElementById('refreshBtn')?.addEventListener('click', () => {
 });
 
 async function fetchBuildersData() {
-    try {
-        const response = await fetch('/api/builders');
-        const data = await response.json();
-        if (!data.success) return;
+    const refreshBtn = document.getElementById('buildersRefreshBtn');
+    if (refreshBtn) refreshBtn.classList.add('spinning');
 
+    const renderBuilders = (data) => {
         const grid = document.getElementById('buildersGrid');
         if (!grid) return;
 
         const updatedEl = document.getElementById('buildersUpdatedAt');
         if (updatedEl && data.updated_at) updatedEl.textContent = `更新于 ${data.updated_at}`;
+
+        // 渲染 AI 摘要面板
+        renderBuildersSummary(data.summary);
+
+        if (refreshBtn) refreshBtn.classList.remove('spinning');
 
         if (!data.sources || data.sources.length === 0) {
             grid.innerHTML = '<p style="color:#888;">暂无数据</p>';
@@ -155,70 +219,160 @@ async function fetchBuildersData() {
                     <div class="builders-items">${itemsHtml}</div>
                 </div>`;
         }).join('');
+    };
 
-    } catch (e) {
-        console.error('Builders feed error:', e);
+    await fetchWithComputingPoll('/api/builders', {
+        pollKey: '_buildersPollTimer',
+        maxWaitMs: 5 * 60 * 1000,
+        delays: [10000, 20000, 30000, 60000],
+        onData: renderBuilders,
+        onError: (e) => {
+            console.error('Builders feed error:', e);
+            if (refreshBtn) refreshBtn.classList.remove('spinning');
+        },
+    });
+
+    if (!window._buildersPollTimer && refreshBtn) {
+        refreshBtn.classList.remove('spinning');
     }
 }
 
 /**
- * 获取仪表盘数据（支持冷启动轮询）
- * 服务器返回 computing:true (202) 时，每 8 秒自动重试，最多等待 10 分钟
+ * 渲染开发者动态 AI 摘要面板（离线模板聚合）
+ */
+function renderBuildersSummary(summary) {
+    const body = document.getElementById('buildersSummaryBody');
+    const meta = document.getElementById('buildersSummaryMeta');
+    if (!body) return;
+
+    if (!summary || summary.total_items === 0) {
+        body.innerHTML = '<p style="color:#888;font-size:0.85rem;">暂无摘要数据</p>';
+        if (meta) meta.textContent = '';
+        return;
+    }
+
+    if (meta) {
+        meta.textContent = `· ${summary.total_items} 条 / ${summary.total_sources} 源 · 更新于 ${summary.generated_at}`;
+    }
+
+    // 把简易 markdown (**bold**, `code`) 渲染为安全 HTML
+    const mdToHtml = (txt) => (txt || '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // 顶部：中文叙述段落
+    const narrativeHtml = summary.narrative
+        ? `<div class="bs-narrative">${mdToHtml(summary.narrative)}</div>`
+        : '';
+
+    // 跨源热议（社区共识级别信号）
+    const crossHtml = (summary.cross_source_topics || []).length > 0
+        ? `<div class="bs-section">
+              <div class="bs-section-title">🔥 跨源热议（全社区聚焦）</div>
+              <div class="bs-cross-list">
+                ${summary.cross_source_topics.map(t => `
+                  <div class="bs-cross-item" title="${t.sources.join(', ')}">
+                    <span class="bs-cross-icon">${t.icon}</span>
+                    <span class="bs-cross-topic">${t.topic}</span>
+                    <span class="bs-cross-badge">${t.source_count} 源 · ${t.item_count} 条</span>
+                  </div>
+                `).join('')}
+              </div>
+           </div>`
+        : '';
+
+    // 热门主题（topic 内附 takeaway + top items）
+    const highlightsHtml = (summary.highlights || []).length > 0
+        ? `<div class="bs-section">
+              <div class="bs-section-title">📌 热门主题 Top 5</div>
+              <div class="bs-highlights">
+                ${summary.highlights.map(h => `
+                  <div class="bs-topic-card">
+                    <div class="bs-topic-head">
+                      <span class="bs-topic-icon">${h.icon}</span>
+                      <span class="bs-topic-name">${h.topic}</span>
+                      <span class="bs-topic-count">${h.count} 条</span>
+                    </div>
+                    ${h.takeaway ? `<div class="bs-topic-takeaway">${h.takeaway}</div>` : ''}
+                    <ul class="bs-topic-items">
+                      ${h.items.map(it => `
+                        <li>
+                          <a href="${it.url}" target="_blank" rel="noopener noreferrer">
+                            <span class="bs-item-src">${it.source_icon}</span>
+                            <span class="bs-item-title">${it.title}</span>
+                            ${it.date ? `<span class="bs-item-date">${it.date}</span>` : ''}
+                          </a>
+                        </li>`).join('')}
+                    </ul>
+                  </div>
+                `).join('')}
+              </div>
+           </div>`
+        : '';
+
+    // 高频关键词标签云
+    const kwHtml = (summary.trending_keywords || []).length > 0
+        ? `<div class="bs-section">
+              <div class="bs-section-title">🔤 高频关键词</div>
+              <div class="bs-keywords">
+                ${summary.trending_keywords.map(k => {
+                  const weight = Math.min(1.2, 0.7 + k.count * 0.05);
+                  return `<span class="bs-kw" style="font-size:${weight}rem;" title="出现 ${k.count} 次">${k.word}<sup>${k.count}</sup></span>`;
+                }).join('')}
+              </div>
+           </div>`
+        : '';
+
+    const methodNote = summary.method
+        ? `<div class="bs-method">⚙️ ${summary.method}</div>`
+        : '';
+
+    body.innerHTML = narrativeHtml + crossHtml + highlightsHtml + kwHtml + methodNote;
+}
+
+// 初始化：手动刷新按钮
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('buildersRefreshBtn');
+    if (btn) {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // 强制后端触发刷新：用 cache-bust 参数命中冷路径不可行（GET 缓存仍命中）；
+            // 直接重新调用 /api/builders 即可，过期时后端会自动 SWR 刷新
+            fetchBuildersData();
+        });
+    }
+});
+
+/**
+ * 获取仪表盘数据（支持冷启动轮询 + 指数退避 8s → 16s → 30s）
  */
 async function fetchDashboardData(isRetry) {
     const refreshBtn = document.getElementById('refreshBtn');
     if (!isRetry && refreshBtn) refreshBtn.classList.add('spinning');
 
-    try {
-        const response = await fetch('/api/dashboard');
-        const data = await response.json();
-
-        if (data.success) {
+    await fetchWithComputingPoll('/api/dashboard', {
+        pollKey: '_dashboardPollTimer',
+        onData: (data) => {
             renderDashboard(data);
             if (refreshBtn) refreshBtn.classList.remove('spinning');
-            return;
-        }
+        },
+        onBanner: () => _showComputingBanner(),
+        onHideBanner: () => _hideComputingBanner(),
+        onTimeout: () => {
+            showError('指标加载超时，请手动刷新页面');
+            if (refreshBtn) refreshBtn.classList.remove('spinning');
+        },
+        onError: (err) => {
+            console.error('Error fetching dashboard data:', err);
+            showError(typeof err === 'string' ? err : '无法连接到服务器');
+            if (refreshBtn) refreshBtn.classList.remove('spinning');
+        },
+    });
 
-        // 服务器正在计算（冷启动），显示提示并轮询
-        if (data.computing) {
-            _showComputingBanner();
-            if (!window._dashboardPollTimer) {
-                let attempts = 0;
-                window._dashboardPollTimer = setInterval(async () => {
-                    attempts++;
-                    if (attempts > 75) { // 最多等 10 分钟 (75 × 8s)
-                        clearInterval(window._dashboardPollTimer);
-                        window._dashboardPollTimer = null;
-                        _hideComputingBanner();
-                        showError('指标加载超时，请手动刷新页面');
-                        if (refreshBtn) refreshBtn.classList.remove('spinning');
-                        return;
-                    }
-                    try {
-                        const r2 = await fetch('/api/dashboard');
-                        const d2 = await r2.json();
-                        if (d2.success) {
-                            clearInterval(window._dashboardPollTimer);
-                            window._dashboardPollTimer = null;
-                            _hideComputingBanner();
-                            renderDashboard(d2);
-                            if (refreshBtn) refreshBtn.classList.remove('spinning');
-                        }
-                    } catch(e) { /* 静默忽略轮询错误 */ }
-                }, 8000);
-            }
-            return;
-        }
-
-        showError(data.error || '获取数据失败');
-    } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-        showError('无法连接到服务器');
-    } finally {
-        // 非 computing 情况下才立即停止 spinner
-        if (!window._dashboardPollTimer && refreshBtn) {
-            refreshBtn.classList.remove('spinning');
-        }
+    // 非 computing 情况下立即停止 spinner（renderDashboard 成功也会停）
+    if (!window._dashboardPollTimer && refreshBtn) {
+        refreshBtn.classList.remove('spinning');
     }
 }
 
@@ -975,51 +1129,44 @@ function showError(message) {
 }
 
 /**
- * 获取资讯数据
+ * 获取资讯数据（支持冷启动 202 轮询）
  */
 async function fetchNewsData() {
     console.log('Fetching news data...');
     const newsRefreshBtn = document.getElementById('newsRefreshBtn');
     if (newsRefreshBtn) newsRefreshBtn.classList.add('spinning');
-    try {
-        const response = await fetch('/api/news');
-        const data = await response.json();
 
-        if (data.success) {
-            // 渲染鲸鱼动态（先渲染左栏，再渲染资讯）
-            if (data.whales && data.whales.length > 0) {
-                renderWhaleActivity(data.whales);
-            }
-            // 渲染鲸鱼买卖量统计
-            if (data.whale_stats) {
-                renderWhaleStats(data.whale_stats);
-            }
-            // 渲染交易所BTC余额
-            if (data.exchange_balance) {
-                renderExchangeBalance(data.exchange_balance);
-            }
-            // 渲染宏观经济日历
-            if (data.calendar && data.calendar.length > 0) {
-                renderMacroCalendar(data.calendar);
-            }
-            // 渲染资讯
-            if (data.news && data.news.length > 0) {
-                renderCryptoNews(data.news);
-            }
-            // 更新时间
-            const updatedEl = document.getElementById('newsUpdatedAt');
-            if (updatedEl) {
-                const now = new Date();
-                updatedEl.textContent = `更新于 ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
-            }
-            console.log('News data loaded successfully');
-        } else {
-            console.error('News API error:', data.error);
+    const renderAll = (data) => {
+        if (data.whales && data.whales.length > 0) renderWhaleActivity(data.whales);
+        if (data.whale_stats) renderWhaleStats(data.whale_stats);
+        if (data.exchange_balance) renderExchangeBalance(data.exchange_balance);
+        if (data.calendar && data.calendar.length > 0) renderMacroCalendar(data.calendar);
+        if (data.news && data.news.length > 0) renderCryptoNews(data.news);
+        const updatedEl = document.getElementById('newsUpdatedAt');
+        if (updatedEl) {
+            const now = new Date();
+            updatedEl.textContent = `更新于 ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
         }
-    } catch (error) {
-        console.error('Failed to fetch news:', error);
-    } finally {
         if (newsRefreshBtn) newsRefreshBtn.classList.remove('spinning');
+    };
+
+    await fetchWithComputingPoll('/api/news', {
+        pollKey: '_newsPollTimer',
+        maxWaitMs: 3 * 60 * 1000,         // 资讯冷启动最多等 3 分钟
+        delays: [5000, 10000, 20000, 30000],
+        onData: renderAll,
+        onTimeout: () => {
+            console.warn('News 加载超时');
+            if (newsRefreshBtn) newsRefreshBtn.classList.remove('spinning');
+        },
+        onError: (err) => {
+            console.error('Failed to fetch news:', err);
+            if (newsRefreshBtn) newsRefreshBtn.classList.remove('spinning');
+        },
+    });
+
+    if (!window._newsPollTimer && newsRefreshBtn) {
+        newsRefreshBtn.classList.remove('spinning');
     }
 }
 

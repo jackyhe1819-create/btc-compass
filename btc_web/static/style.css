@@ -2464,3 +2464,205 @@ body::before {
     color: #555;
     margin-top: 4px;
 }
+
+/* ── 开发者动态 AI 摘要面板 ───────────────────────────────────── */
+.builders-refresh-btn {
+    background: transparent;
+    border: 1px solid rgba(247,147,26,0.3);
+    color: #f7931a;
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-left: 10px;
+    transition: background 0.2s, transform 0.4s ease;
+    font-family: inherit;
+}
+.builders-refresh-btn:hover { background: rgba(247,147,26,0.12); }
+.builders-refresh-btn.spinning { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.builders-summary-panel {
+    margin: 14px 20px 18px;
+    border: 1px solid rgba(247,147,26,0.18);
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgba(247,147,26,0.06), rgba(100,160,255,0.04));
+    overflow: hidden;
+}
+.builders-summary-toggle {
+    cursor: pointer;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.95rem;
+    color: #ddd;
+    user-select: none;
+    list-style: none;
+}
+.builders-summary-toggle::-webkit-details-marker { display: none; }
+.builders-summary-toggle:hover { background: rgba(247,147,26,0.08); }
+.bs-icon { font-size: 1.1rem; }
+.bs-label { font-weight: 600; color: #f7931a; }
+.bs-meta { color: #888; font-size: 0.78rem; margin-left: auto; }
+.bs-chev { color: #888; font-size: 0.9rem; transition: transform 0.2s; margin-left: 8px; }
+.builders-summary-panel[open] .bs-chev { transform: rotate(180deg); }
+
+.builders-summary-body {
+    padding: 4px 16px 18px;
+    border-top: 1px dashed rgba(247,147,26,0.15);
+}
+
+/* 中文叙述段落 */
+.bs-narrative {
+    margin: 6px 0 4px;
+    padding: 12px 14px;
+    background: rgba(247,147,26,0.05);
+    border-left: 3px solid rgba(247,147,26,0.5);
+    border-radius: 4px;
+    color: #d8d8d8;
+    font-size: 0.88rem;
+    line-height: 1.7;
+}
+.bs-narrative strong { color: #f7931a; font-weight: 600; }
+.bs-narrative code {
+    background: rgba(100,160,255,0.12);
+    color: #9ec3ff;
+    padding: 1px 6px; border-radius: 3px;
+    font-size: 0.85em;
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* 主题卡片的中文一句话要点 */
+.bs-topic-takeaway {
+    font-size: 0.76rem;
+    color: #aaa;
+    margin: -2px 0 8px;
+    padding: 4px 6px;
+    background: rgba(255,255,255,0.025);
+    border-radius: 3px;
+    line-height: 1.45;
+}
+
+.bs-section { margin-top: 14px; }
+.bs-section-title {
+    font-size: 0.8rem;
+    color: #aaa;
+    margin-bottom: 8px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+
+/* 跨源热议 */
+.bs-cross-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.bs-cross-item {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255,80,80,0.1);
+    border: 1px solid rgba(255,80,80,0.25);
+    padding: 5px 10px; border-radius: 14px;
+    font-size: 0.82rem; color: #ffb0b0;
+}
+.bs-cross-topic { font-weight: 500; }
+.bs-cross-badge { font-size: 0.72rem; color: #888; }
+
+/* 热门主题卡片 */
+.bs-highlights {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+}
+.bs-topic-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 6px;
+    padding: 10px 12px;
+}
+.bs-topic-head {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 0.88rem; color: #ddd; margin-bottom: 6px;
+}
+.bs-topic-icon { font-size: 1rem; }
+.bs-topic-name { flex: 1; font-weight: 500; }
+.bs-topic-count {
+    font-size: 0.72rem; color: #f7931a;
+    background: rgba(247,147,26,0.12); padding: 2px 7px; border-radius: 10px;
+}
+.bs-topic-items { list-style: none; padding: 0; margin: 0; }
+.bs-topic-items li { margin: 4px 0; }
+.bs-topic-items a {
+    display: flex; align-items: baseline; gap: 6px;
+    text-decoration: none; color: #b8b8b8;
+    font-size: 0.78rem; line-height: 1.35;
+    padding: 3px 4px; border-radius: 3px;
+}
+.bs-topic-items a:hover { background: rgba(247,147,26,0.08); color: #fff; }
+.bs-item-src { font-size: 0.75rem; flex-shrink: 0; }
+.bs-item-title {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bs-item-date { font-size: 0.7rem; color: #666; flex-shrink: 0; }
+
+/* 关键词云 */
+.bs-keywords {
+    display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline;
+    padding: 4px 0;
+}
+.bs-kw {
+    color: #d0d0d0;
+    background: rgba(100,160,255,0.08);
+    padding: 3px 9px; border-radius: 12px;
+    cursor: default;
+}
+.bs-kw sup { font-size: 0.65em; color: #888; margin-left: 2px; }
+
+.bs-method {
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px dashed rgba(255,255,255,0.06);
+    font-size: 0.72rem; color: #666; text-align: right;
+}
+
+/* ── Warm 主题适配 ────────────────────────────────────────────── */
+[data-theme="warm"] .builders-summary-panel {
+    background: linear-gradient(135deg, rgba(247,147,26,0.08), rgba(60,120,200,0.05));
+    border-color: rgba(212,114,14,0.25);
+}
+[data-theme="warm"] .builders-summary-toggle { color: #2e2618; }
+[data-theme="warm"] .bs-label { color: #a05000; }
+[data-theme="warm"] .bs-meta,
+[data-theme="warm"] .bs-chev,
+[data-theme="warm"] .bs-section-title { color: #6b5a44; }
+[data-theme="warm"] .bs-topic-card {
+    background: rgba(255,255,255,0.6);
+    border-color: rgba(180,150,110,0.2);
+}
+[data-theme="warm"] .bs-topic-head,
+[data-theme="warm"] .bs-topic-items a { color: #2e2618; }
+[data-theme="warm"] .bs-topic-items a:hover { background: rgba(247,147,26,0.12); color: #1a1a1a; }
+[data-theme="warm"] .bs-item-date { color: #9a8a70; }
+[data-theme="warm"] .bs-cross-item {
+    background: rgba(220,70,70,0.08);
+    border-color: rgba(220,70,70,0.25);
+    color: #a02828;
+}
+[data-theme="warm"] .bs-kw {
+    background: rgba(60,120,200,0.1); color: #1a3a6a;
+}
+[data-theme="warm"] .bs-kw sup { color: #7a6850; }
+[data-theme="warm"] .bs-method { color: #9a8a70; }
+[data-theme="warm"] .builders-refresh-btn {
+    border-color: rgba(212,114,14,0.3); color: #a05000;
+}
+[data-theme="warm"] .builders-refresh-btn:hover { background: rgba(247,147,26,0.14); }
+[data-theme="warm"] .bs-narrative {
+    background: rgba(247,147,26,0.06);
+    border-left-color: rgba(212,114,14,0.55);
+    color: #2e2618;
+}
+[data-theme="warm"] .bs-narrative strong { color: #a05000; }
+[data-theme="warm"] .bs-narrative code {
+    background: rgba(60,120,200,0.1); color: #1a3a6a;
+}
+[data-theme="warm"] .bs-topic-takeaway {
+    color: #6b5a44;
+    background: rgba(0,0,0,0.025);
+}

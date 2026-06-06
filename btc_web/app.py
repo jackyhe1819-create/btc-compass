@@ -8,14 +8,74 @@ Flask 后端服务，提供 API 接口返回 BTC 指标数据
 
 import sys
 import os
+import json
+import tempfile
 import threading
 
 # 添加当前目录到路径以导入 btc_dashboard（btc_dashboard.py 与 app.py 同级）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, make_response
 from datetime import datetime
 import numpy as np
+
+
+def _swr_headers(response, fresh_s: int, swr_s: int):
+    """为 SWR 响应加 Cache-Control（fresh 期内直接命中，过期后允许浏览器使用 stale 数据）"""
+    response.headers['Cache-Control'] = (
+        f'public, max-age={max(0, fresh_s)}, stale-while-revalidate={swr_s}'
+    )
+    return response
+
+
+# ── 缓存持久化（跨重启/多 worker 共享）─────────────────────────────
+# 缓存目录可通过 BTC_CACHE_DIR 环境变量配置，默认 ./cache/
+_CACHE_DIR = os.environ.get(
+    "BTC_CACHE_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+)
+try:
+    os.makedirs(_CACHE_DIR, exist_ok=True)
+except OSError as e:
+    print(f"⚠️ 无法创建缓存目录 {_CACHE_DIR}: {e}")
+
+
+def _cache_path(key: str) -> str:
+    return os.path.join(_CACHE_DIR, f"{key}.json")
+
+
+def _load_cache_from_disk(key: str):
+    """读取磁盘缓存，返回 (data, timestamp) 或 (None, None)"""
+    path = _cache_path(key)
+    if not os.path.exists(path):
+        return None, None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+        ts = datetime.fromisoformat(obj["timestamp"])
+        return obj["data"], ts
+    except Exception as e:
+        print(f"⚠️ 读取缓存失败 {key}: {e}")
+        return None, None
+
+
+def _save_cache_to_disk(key: str, data, timestamp: datetime):
+    """原子写入缓存到磁盘（tmpfile + rename，避免并发读到半截文件）"""
+    path = _cache_path(key)
+    payload = {"timestamp": timestamp.isoformat(), "data": data}
+    try:
+        # 写入同目录的临时文件后 rename，POSIX 上 rename 是原子的
+        fd, tmp = tempfile.mkstemp(dir=_CACHE_DIR, prefix=f".{key}_", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp, path)
+        except Exception:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+    except Exception as e:
+        print(f"⚠️ 写入缓存失败 {key}: {e}")
 
 # 导入 dashboard 运行函数和历史数据函数
 from btc_dashboard import (
@@ -31,24 +91,28 @@ app = Flask(__name__)
 # ── BTC 价格/指标缓存（5 分钟）──────────────────────────────────────
 _btc_data_cache = None
 _btc_data_timestamp = None
+_btc_data_lock = threading.Lock()
 
 # ── 仪表盘缓存（stale-while-revalidate，5 分钟 TTL）─────────────────
 _dashboard_cache = None
 _dashboard_cache_timestamp = None
 _dashboard_refreshing = False
+_dashboard_lock = threading.Lock()
 _DASHBOARD_TTL = 300              # 5 分钟
 
 # ── 资讯缓存（stale-while-revalidate，15 分钟 TTL）──────────────────
 _news_cache = None
 _news_cache_timestamp = None
 _news_refreshing = False          # 防止并发重复刷新
+_news_lock = threading.Lock()
 _NEWS_TTL = 900                   # 15 分钟
 
 # ── 开发者动态缓存（stale-while-revalidate，30 分钟 TTL）────────────
 _builders_cache = None
 _builders_cache_timestamp = None
 _builders_refreshing = False
-_BUILDERS_TTL = 1800              # 30 分钟
+_builders_lock = threading.Lock()
+_BUILDERS_TTL = 3600              # 1 小时（与摘要刷新对齐）
 
 
 def _do_refresh_dashboard():
@@ -83,6 +147,7 @@ def _do_refresh_dashboard():
             "sparklines": sparklines
         }
         _dashboard_cache_timestamp = datetime.now()
+        _save_cache_to_disk("dashboard", _dashboard_cache, _dashboard_cache_timestamp)
         print(f"✅ 仪表盘缓存刷新完成 {_dashboard_cache_timestamp.strftime('%H:%M:%S')}")
     except Exception as e:
         global _last_error
@@ -97,10 +162,12 @@ def _do_refresh_dashboard():
 def trigger_dashboard_refresh():
     """触发后台刷新仪表盘（若未在刷新中）。"""
     global _dashboard_refreshing
-    if not _dashboard_refreshing:
+    with _dashboard_lock:
+        if _dashboard_refreshing:
+            return
         _dashboard_refreshing = True
-        t = threading.Thread(target=_do_refresh_dashboard, daemon=True)
-        t.start()
+    t = threading.Thread(target=_do_refresh_dashboard, daemon=True)
+    t.start()
 
 
 def _do_refresh_news():
@@ -128,6 +195,7 @@ def _do_refresh_news():
                     results[key] = [] if key in ("news", "whales", "calendar", "crypto_calendar") else {}
         _news_cache = results
         _news_cache_timestamp = datetime.now()
+        _save_cache_to_disk("news", _news_cache, _news_cache_timestamp)
         print(f"✅ 资讯缓存刷新完成 {_news_cache_timestamp.strftime('%H:%M:%S')}")
     except Exception as e:
         import traceback
@@ -139,10 +207,12 @@ def _do_refresh_news():
 def trigger_news_refresh():
     """触发后台刷新（若未在刷新中）。"""
     global _news_refreshing
-    if not _news_refreshing:
+    with _news_lock:
+        if _news_refreshing:
+            return
         _news_refreshing = True
-        t = threading.Thread(target=_do_refresh_news, daemon=True)
-        t.start()
+    t = threading.Thread(target=_do_refresh_news, daemon=True)
+    t.start()
 
 
 def _do_refresh_builders():
@@ -152,6 +222,7 @@ def _do_refresh_builders():
         data = fetch_builders_feed(limit=30)
         _builders_cache = data
         _builders_cache_timestamp = datetime.now()
+        _save_cache_to_disk("builders", _builders_cache, _builders_cache_timestamp)
         print(f"✅ 开发者动态缓存刷新完成 {_builders_cache_timestamp.strftime('%H:%M:%S')}")
     except Exception as e:
         import traceback
@@ -164,10 +235,12 @@ def _do_refresh_builders():
 def trigger_builders_refresh():
     """触发后台刷新开发者动态（若未在刷新中）。"""
     global _builders_refreshing
-    if not _builders_refreshing:
+    with _builders_lock:
+        if _builders_refreshing:
+            return
         _builders_refreshing = True
-        t = threading.Thread(target=_do_refresh_builders, daemon=True)
-        t.start()
+    t = threading.Thread(target=_do_refresh_builders, daemon=True)
+    t.start()
 
 
 def get_cached_btc_data():
@@ -176,11 +249,39 @@ def get_cached_btc_data():
 
     # 缓存 5 分钟
     if _btc_data_cache is None or _btc_data_timestamp is None or \
-       (datetime.now() - _btc_data_timestamp).seconds > 300:
+       (datetime.now() - _btc_data_timestamp).total_seconds() > 300:
         _btc_data_cache = fetch_btc_data()
         _btc_data_timestamp = datetime.now()
 
     return _btc_data_cache
+
+
+# ── 启动时：先从磁盘加载已有缓存（多 worker / 重启共享）────────────
+def _bootstrap_disk_cache():
+    """从磁盘恢复缓存（若存在），避免每次重启都冷启动"""
+    global _dashboard_cache, _dashboard_cache_timestamp
+    global _news_cache, _news_cache_timestamp
+    global _builders_cache, _builders_cache_timestamp
+
+    d_data, d_ts = _load_cache_from_disk("dashboard")
+    if d_data is not None:
+        _dashboard_cache = d_data
+        _dashboard_cache_timestamp = d_ts
+        print(f"📦 从磁盘恢复仪表盘缓存（{d_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
+
+    n_data, n_ts = _load_cache_from_disk("news")
+    if n_data is not None:
+        _news_cache = n_data
+        _news_cache_timestamp = n_ts
+        print(f"📦 从磁盘恢复资讯缓存（{n_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
+
+    b_data, b_ts = _load_cache_from_disk("builders")
+    if b_data is not None:
+        _builders_cache = b_data
+        _builders_cache_timestamp = b_ts
+        print(f"📦 从磁盘恢复开发者动态缓存（{b_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
+
+_bootstrap_disk_cache()
 
 
 # ── 启动时预热缓存（延迟 5s，避免启动瞬间内存峰值）──────────────────
@@ -230,26 +331,30 @@ def api_dashboard():
     global _dashboard_cache, _dashboard_cache_timestamp
 
     now = datetime.now()
-    cache_age = (now - _dashboard_cache_timestamp).seconds if _dashboard_cache_timestamp else None
+    cache_age = int((now - _dashboard_cache_timestamp).total_seconds()) if _dashboard_cache_timestamp else None
     has_cache = _dashboard_cache is not None
 
     if has_cache:
         if cache_age is not None and cache_age >= _DASHBOARD_TTL:
             trigger_dashboard_refresh()
-        return jsonify({
+        resp = jsonify({
             "success": True,
             "cached": True,
             "cache_age_s": cache_age,
             **_dashboard_cache
         })
+        fresh_left = max(0, _DASHBOARD_TTL - (cache_age or 0))
+        return _swr_headers(resp, fresh_left, _DASHBOARD_TTL)
 
     # 无缓存（冷启动）：立即返回 computing 状态，前端负责轮询
     trigger_dashboard_refresh()
-    return jsonify({
+    resp = jsonify({
         "success": False,
         "computing": True,
         "error": "指标计算中，请稍候…"
-    }), 202
+    })
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp, 202
 
 
 @app.route('/api/history/<indicator_name>')
@@ -265,10 +370,12 @@ def api_history(indicator_name: str):
         # 获取历史数据
         history = get_indicator_history(indicator_name, df, days)
 
-        return jsonify({
+        resp = jsonify({
             "success": True,
             **history
         })
+        resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=600'
+        return resp
 
     except Exception as e:
         import traceback
@@ -287,34 +394,31 @@ def api_news():
     global _news_cache, _news_cache_timestamp
 
     now = datetime.now()
-    cache_age = (now - _news_cache_timestamp).seconds if _news_cache_timestamp else None
+    cache_age = int((now - _news_cache_timestamp).total_seconds()) if _news_cache_timestamp else None
     has_cache = _news_cache is not None
 
     if has_cache:
         # 缓存过期 → 后台异步刷新，本次仍返回旧数据
         if cache_age is not None and cache_age >= _NEWS_TTL:
             trigger_news_refresh()
-        return jsonify({
+        resp = jsonify({
             "success": True,
             "cached": True,
             "cache_age_s": cache_age,
             **_news_cache
         })
+        fresh_left = max(0, _NEWS_TTL - (cache_age or 0))
+        return _swr_headers(resp, fresh_left, _NEWS_TTL)
 
-    # 无缓存（冷启动场景）：等待后台刷新完成
-    # 先触发（若未在刷新中），然后轮询最多 35 秒
+    # 无缓存（冷启动）：立即返回 computing 状态，避免阻塞 worker
     trigger_news_refresh()
-    import time
-    for _ in range(70):
-        time.sleep(0.5)
-        if _news_cache is not None:
-            return jsonify({
-                "success": True,
-                "cached": False,
-                "cache_age_s": 0,
-                **_news_cache
-            })
-    return jsonify({"success": False, "error": "资讯加载超时，请稍后刷新"}), 504
+    resp = jsonify({
+        "success": False,
+        "computing": True,
+        "error": "资讯加载中，请稍候…"
+    })
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp, 202
 
 
 @app.route('/api/builders')
@@ -328,32 +432,30 @@ def api_builders():
     global _builders_cache, _builders_cache_timestamp
 
     now = datetime.now()
-    cache_age = (now - _builders_cache_timestamp).seconds if _builders_cache_timestamp else None
+    cache_age = int((now - _builders_cache_timestamp).total_seconds()) if _builders_cache_timestamp else None
     has_cache = _builders_cache is not None
 
     if has_cache:
         if cache_age is not None and cache_age >= _BUILDERS_TTL:
             trigger_builders_refresh()
-        return jsonify({
+        resp = jsonify({
             "success": True,
             "cached": True,
             "cache_age_s": cache_age,
             **_builders_cache
         })
+        fresh_left = max(0, _BUILDERS_TTL - (cache_age or 0))
+        return _swr_headers(resp, fresh_left, _BUILDERS_TTL)
 
-    # 无缓存（冷启动）：触发刷新并轮询最多 60 秒
+    # 无缓存（冷启动）：立即返回 computing 状态，前端负责轮询
     trigger_builders_refresh()
-    import time
-    for _ in range(120):
-        time.sleep(0.5)
-        if _builders_cache is not None:
-            return jsonify({
-                "success": True,
-                "cached": False,
-                "cache_age_s": 0,
-                **_builders_cache
-            })
-    return jsonify({"success": False, "error": "开发者动态加载超时，请稍后刷新"}), 504
+    resp = jsonify({
+        "success": False,
+        "computing": True,
+        "error": "开发者动态加载中，请稍候…"
+    })
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp, 202
 
 
 if __name__ == '__main__':

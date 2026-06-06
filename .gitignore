@@ -30,3 +30,21 @@ btc_web/server.log
 # Temporary files
 *.tmp
 *.bak
+
+# Runtime cache (持久化的 SWR 缓存)
+btc_web/cache/
+cache/
+
+# Local-only / IDE / archived directories (不进仓库)
+.claude/
+.superpowers/
+_archive/
+_legacy/
+archive/
+
+# 根目录的过时副本（真实数据在 btc_web/exchange_balance_history.json）
+/exchange_balance_history.json
+
+# Ad-hoc 调试脚本与 superpowers 相关
+btc_web/test_*.py
+docs/superpowers/
