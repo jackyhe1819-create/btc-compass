@@ -270,51 +270,68 @@ def calc_long_short_ratio() -> IndicatorResult:
 def calc_btc_dominance() -> IndicatorResult:
     """
     BTC 市占率 (Dominance)
-    - 数据源: CoinGecko Global API
-    - 趋势: 牛市初期 BTC.D 上涨 (吸血)，牛市后期 BTC.D 下降 (山寨季)
+    - 主源: CoinGecko Global API
+    - 备源: CoinPaprika /global  （CoinGecko 在云 IP 上常被限流）
     """
+    btc_d = None
+    src = ""
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+
+    # 主源 CoinGecko
     try:
-        response = requests.get(
-            "https://api.coingecko.com/api/v3/global",
-            timeout=15
-        )
-        if response.status_code == 200:
-            data = response.json()
-            btc_d = data["data"]["market_cap_percentage"]["btc"]
-            
-            # 简单评分逻辑: >50% 强势
-            if btc_d > 55:
-                score, color = 1, "🟢"
-                status = f"{btc_d:.1f}% (强势吸血)"
-            elif btc_d > 45:
-                score, color = 0, "🟡"
-                status = f"{btc_d:.1f}% (震荡)"
-            else:
-                score, color = -0.5, "🔴"
-                status = f"{btc_d:.1f}% (弱势/山寨季)"
-            
-            return IndicatorResult(
-                name="BTC市占率",
-                value=btc_d,
-                score=score,
-                color=color,
-                status=status,
-                priority="P2",
-                url="https://coinmarketcap.com/charts/bitcoin-dominance/",
-                description="比特币市值占加密货币总市值的比例，反映了比特币在市场中的主导地位。",
-                method="牛市初期，BTC市占率通常上涨（吸血效应）；牛市后期，随着资金流向山寨币，BTC市占率可能下降（山寨季）。"
-            )
+        r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10, headers=headers)
+        if r.status_code == 200:
+            btc_d = r.json()["data"]["market_cap_percentage"]["btc"]
+            src = "CoinGecko"
+        else:
+            print(f"⚠️ CoinGecko Global 返回 {r.status_code}")
     except Exception as e:
         print(f"⚠️ CoinGecko Global API 失败: {e}")
-    
+
+    # 备源 CoinPaprika
+    if btc_d is None:
+        try:
+            r = requests.get("https://api.coinpaprika.com/v1/global", timeout=10, headers=headers)
+            if r.status_code == 200:
+                btc_d = r.json().get("bitcoin_dominance_percentage")
+                src = "CoinPaprika"
+            else:
+                print(f"⚠️ CoinPaprika Global 返回 {r.status_code}")
+        except Exception as e:
+            print(f"⚠️ CoinPaprika Global API 失败: {e}")
+
+    if btc_d is None:
+        return IndicatorResult(
+            name="BTC市占率",
+            value=float('nan'),
+            score=0,
+            color="⚪",
+            status="API 暂不可用",
+            priority="P2",
+            url="https://coinmarketcap.com/charts/bitcoin-dominance/"
+        )
+
+    # 简单评分逻辑: >50% 强势
+    if btc_d > 55:
+        score, color = 1, "🟢"
+        status = f"{btc_d:.1f}% (强势吸血)"
+    elif btc_d > 45:
+        score, color = 0, "🟡"
+        status = f"{btc_d:.1f}% (震荡)"
+    else:
+        score, color = -0.5, "🔴"
+        status = f"{btc_d:.1f}% (弱势/山寨季)"
+
     return IndicatorResult(
         name="BTC市占率",
-        value=float('nan'),
-        score=0,
-        color="⚪",
-        status="API 暂不可用",
+        value=btc_d,
+        score=score,
+        color=color,
+        status=status,
         priority="P2",
-        url="https://coinmarketcap.com/charts/bitcoin-dominance/"
+        url="https://coinmarketcap.com/charts/bitcoin-dominance/",
+        description="比特币市值占加密货币总市值的比例，反映了比特币在市场中的主导地位。",
+        method=f"主源 CoinGecko → 备源 CoinPaprika（本次：{src}）。牛市初期，BTC市占率通常上涨（吸血效应）；牛市后期，随着资金流向山寨币，BTC市占率可能下降（山寨季）。"
     )
 
 def fetch_etf_volume() -> Tuple[float, float, str]:

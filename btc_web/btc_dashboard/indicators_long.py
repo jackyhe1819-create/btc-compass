@@ -217,144 +217,182 @@ def calc_pi_cycle(df: pd.DataFrame) -> IndicatorResult:
     )
 
 
+def _fetch_180d_btc_volumes_usd():
+    """
+    获取 BTC 过去 180 天日成交量（USD）。
+    主源: CoinGecko market_chart  / 备源: CryptoCompare histoday
+    返回: list[float] 或 None
+    """
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+
+    # 主源 CoinGecko
+    try:
+        r = requests.get(
+            "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
+            "?vs_currency=usd&days=180&interval=daily",
+            timeout=10, headers=headers,
+        )
+        if r.status_code == 200:
+            vols = r.json().get('total_volumes', [])
+            if len(vols) >= 100:
+                return [v[1] for v in vols], "CoinGecko"
+        else:
+            print(f"⚠️ CoinGecko Volume 返回 {r.status_code}")
+    except Exception as e:
+        print(f"⚠️ CoinGecko Volume 失败: {e}")
+
+    # 备源 CryptoCompare
+    try:
+        r = requests.get(
+            "https://min-api.cryptocompare.com/data/v2/histoday"
+            "?fsym=BTC&tsym=USD&limit=180",
+            timeout=10, headers=headers,
+        )
+        if r.status_code == 200:
+            data = (r.json() or {}).get('Data', {}).get('Data', [])
+            if len(data) >= 100:
+                # volumeto 是 USD 计价的成交量
+                return [d.get('volumeto', 0) for d in data], "CryptoCompare"
+        else:
+            print(f"⚠️ CryptoCompare Volume 返回 {r.status_code}")
+    except Exception as e:
+        print(f"⚠️ CryptoCompare Volume 失败: {e}")
+
+    return None, ""
+
+
 def calc_lth_supply() -> IndicatorResult:
     """
     长期持有者行为 (Proxy: 成交量趋势分析)
-    - 数据源: CoinGecko (免费, 无需API Key)
-    - 逻辑: 成交量低迷/下降 => 长期持有者在吸筹 (Bullish)
-           成交量爆发/上升 => 长期持有者在派发 (Bearish)
-    - 算法: 比较 7日成交量均值 vs 90日成交量均值的比率
+    - 主源: CoinGecko / 备源: CryptoCompare
+    - 逻辑: 成交量低迷/下降 => 吸筹 (Bullish)；爆发/上升 => 派发 (Bearish)
+    - 算法: 7日成交量均值 vs 90日成交量均值的比率
     """
-    try:
-        response = requests.get(
-            "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=180&interval=daily",
-            timeout=15,
-            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
+    vol_values, src = _fetch_180d_btc_volumes_usd()
+
+    if not vol_values:
+        return IndicatorResult(
+            name="长期持有者(CDD)",
+            value=0,
+            score=0,
+            color="⚪",
+            status="数据源连接失败",
+            priority="P0",
+            url="https://www.coinglass.com/pro/i/bitcoin-cdd",
+            description="使用成交量趋势分析作为长期持有者行为的代理指标。",
+            method="主源 CoinGecko + 备源 CryptoCompare 均失败。"
         )
-        
-        if response.status_code == 200:
-            data = response.json()
-            volumes = data.get('total_volumes', [])
-            
-            if not volumes or len(volumes) < 100:
-                print(f"⚠️ Volume 数据不足: {len(volumes) if volumes else 0} 条")
-                return IndicatorResult(name="长期持有者(CDD)", value=float('nan'), score=0, color="⚪", status="数据不足", priority="P0")
-            
-            # 提取成交量数据
-            vol_values = [v[1] for v in volumes]
-            df_vol = pd.DataFrame({'volume': vol_values})
-            
-            # 计算 7日均线 和 90日均线
-            sma7 = df_vol['volume'].rolling(window=7).mean().iloc[-1]
-            sma90 = df_vol['volume'].rolling(window=90).mean().iloc[-1]
-            
-            # 成交量比率: 短期 / 长期
-            vol_ratio = sma7 / sma90
-            
-            # 当前7日均成交量 (亿美元)
-            vol_billion = sma7 / 1e9
-            
-            # 信号逻辑:
-            # 低成交量 (ratio < 0.8) => 吸筹期 (Bullish)
-            # 正常成交量 (0.8-1.3) => 平稳期
-            # 高成交量 (ratio > 1.3) => 活跃期 (可能派发)
-            # 极高成交量 (ratio > 2.0) => 派发期 (Bearish)
-            
-            if vol_ratio < 0.7:
-                score, color = 1, "🟢"
-                status = f"深度吸筹 (量比 {vol_ratio:.2f})"
-            elif vol_ratio < 0.9:
-                score, color = 0.5, "🟢"
-                status = f"吸筹中 (量比 {vol_ratio:.2f})"
-            elif vol_ratio > 2.0:
-                score, color = -1, "🔴"
-                status = f"大量派发 (量比 {vol_ratio:.2f})"
-            elif vol_ratio > 1.5:
-                score, color = -0.5, "🟠"
-                status = f"轻微派发 (量比 {vol_ratio:.2f})"
-            else:
-                score, color = 0, "🟡"
-                status = f"持币观望 (量比 {vol_ratio:.2f})"
-            
-            return IndicatorResult(
-                name="长期持有者(CDD)",
-                value=round(vol_ratio, 2),
-                score=score,
-                color=color,
-                status=f"{status} | {vol_billion:.1f}B$/日",
-                priority="P0",
-                url="https://www.coinglass.com/pro/i/bitcoin-cdd",
-                description="使用成交量趋势分析作为长期持有者行为的代理指标。低成交量通常意味着长期持有者在吸筹，高成交量可能意味着派发。",
-                method="计算 BTC 近7日均成交量与90日均成交量的比率。量比 < 0.8 代表吸筹（看多），量比 > 1.5 代表可能派发（看空）。数据来源: CoinGecko。"
-            )
-        else:
-            print(f"⚠️ CoinGecko Volume API 返回 {response.status_code}")
-            
-    except Exception as e:
-        print(f"⚠️ LTH Volume Proxy Failed: {e}")
-        
-    # 返回中性状态
+
+    df_vol = pd.DataFrame({'volume': vol_values})
+    sma7 = df_vol['volume'].rolling(window=7).mean().iloc[-1]
+    sma90 = df_vol['volume'].rolling(window=90).mean().iloc[-1]
+    vol_ratio = sma7 / sma90 if sma90 > 0 else 1.0
+    vol_billion = sma7 / 1e9
+
+    if vol_ratio < 0.7:
+        score, color = 1, "🟢"
+        status = f"深度吸筹 (量比 {vol_ratio:.2f})"
+    elif vol_ratio < 0.9:
+        score, color = 0.5, "🟢"
+        status = f"吸筹中 (量比 {vol_ratio:.2f})"
+    elif vol_ratio > 2.0:
+        score, color = -1, "🔴"
+        status = f"大量派发 (量比 {vol_ratio:.2f})"
+    elif vol_ratio > 1.5:
+        score, color = -0.5, "🟠"
+        status = f"轻微派发 (量比 {vol_ratio:.2f})"
+    else:
+        score, color = 0, "🟡"
+        status = f"持币观望 (量比 {vol_ratio:.2f})"
+
     return IndicatorResult(
         name="长期持有者(CDD)",
-        value=0,
-        score=0,
-        color="⚪",
-        status="数据源连接失败",
+        value=round(vol_ratio, 2),
+        score=score,
+        color=color,
+        status=f"{status} | {vol_billion:.1f}B$/日",
         priority="P0",
         url="https://www.coinglass.com/pro/i/bitcoin-cdd",
-        description="使用成交量趋势分析作为长期持有者行为的代理指标。",
-        method="因网络问题无法连接 CoinGecko API。请检查网络连接。"
+        description="使用成交量趋势分析作为长期持有者行为的代理指标。低成交量通常意味着长期持有者在吸筹，高成交量可能意味着派发。",
+        method=f"BTC 近7日均成交量 vs 90日均的比率。量比 < 0.8 = 吸筹（看多），> 1.5 = 可能派发（看空）。本次数据源: {src}。"
     )
 
 
 def calc_hashrate() -> IndicatorResult:
     """
     全网算力 (Network Hashrate)
-    - 数据源: blockchain.info
+    - 主源: mempool.space (3d avg)
+    - 备源: blockchain.info chart API
     - 单位: EH/s (Exahash per second)
     """
+    hashrate_ehs = None
+
+    # 主源：mempool.space — 返回 hashrates[].avgHashrate, 单位 H/s
     try:
-        response = requests.get(
-            "https://blockchain.info/q/hashrate",
-            timeout=10
+        r = requests.get(
+            "https://mempool.space/api/v1/mining/hashrate/3d",
+            timeout=10,
+            headers={"User-Agent": "Mozilla/5.0"},
         )
-        if response.status_code == 200:
-            # API 返回 TH/s，转换为 EH/s
-            hashrate_ths = float(response.text)
-            hashrate_ehs = hashrate_ths / 1_000_000  # TH -> EH
-            
-            # 评分逻辑：算力上涨是利好
-            if hashrate_ehs > 800:
-                score, color = 1, "🟢"
-                status = f"{hashrate_ehs:.1f} EH/s (历史新高)"
-            elif hashrate_ehs > 500:
-                score, color = 0.5, "🟢"
-                status = f"{hashrate_ehs:.1f} EH/s (高算力)"
-            else:
-                score, color = 0, "🟡"
-                status = f"{hashrate_ehs:.1f} EH/s"
-            
-            return IndicatorResult(
-                name="全网算力",
-                value=hashrate_ehs,
-                score=score,
-                color=color,
-                status=status,
-                priority="P2",
-                url="https://www.blockchain.com/explorer/charts/hash-rate",
-                description="全网算力是衡量比特币网络安全性和矿工投入程度的指标。",
-                method="通过区块链浏览器API获取全网算力数据。算力持续增长通常被视为网络健康和长期价值的积极信号。"
-            )
+        if r.status_code == 200:
+            arr = (r.json() or {}).get("hashrates", [])
+            if arr:
+                # 取最近一个点的 avgHashrate（H/s）→ EH/s
+                avg_hs = arr[-1].get("avgHashrate")
+                if avg_hs:
+                    hashrate_ehs = float(avg_hs) / 1e18
     except Exception as e:
-        print(f"⚠️ Hashrate API 失败: {e}")
-    
+        print(f"⚠️ mempool.space hashrate 失败: {e}")
+
+    # 备源：blockchain.info charts API (单位 TH/s)
+    if hashrate_ehs is None:
+        try:
+            r = requests.get(
+                "https://api.blockchain.info/charts/hash-rate?timespan=3days&format=json",
+                timeout=10,
+            )
+            if r.status_code == 200:
+                vals = (r.json() or {}).get("values", [])
+                if vals:
+                    # values[].y 单位 TH/s → EH/s
+                    hashrate_ths = float(vals[-1].get("y", 0))
+                    if hashrate_ths > 0:
+                        hashrate_ehs = hashrate_ths / 1_000_000
+        except Exception as e:
+            print(f"⚠️ blockchain.info hashrate 备源失败: {e}")
+
+    if hashrate_ehs is None:
+        return IndicatorResult(
+            name="全网算力",
+            value=float('nan'),
+            score=0,
+            color="⚪",
+            status="API 暂不可用",
+            priority="P2",
+            url="https://mempool.space/graphs/mining/hashrate-difficulty",
+        )
+
+    # 评分逻辑：算力上涨是利好
+    if hashrate_ehs > 800:
+        score, color = 1, "🟢"
+        status = f"{hashrate_ehs:.1f} EH/s (历史新高)"
+    elif hashrate_ehs > 500:
+        score, color = 0.5, "🟢"
+        status = f"{hashrate_ehs:.1f} EH/s (高算力)"
+    else:
+        score, color = 0, "🟡"
+        status = f"{hashrate_ehs:.1f} EH/s"
+
     return IndicatorResult(
         name="全网算力",
-        value=float('nan'),
-        score=0,
-        color="⚪",
-        status="API 暂不可用",
-        priority="P2"
+        value=hashrate_ehs,
+        score=score,
+        color=color,
+        status=status,
+        priority="P2",
+        url="https://mempool.space/graphs/mining/hashrate-difficulty",
+        description="全网算力是衡量比特币网络安全性和矿工投入程度的指标。",
+        method="主源 mempool.space (3d 平均) → 备源 blockchain.info charts API。算力持续增长通常被视为网络健康和长期价值的积极信号。"
     )
 
 
