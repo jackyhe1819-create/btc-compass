@@ -437,5 +437,145 @@
       "Gemini": 8520.55,
       "Crypto.com": 1.62
     }
+  },
+  {
+    "timestamp": "2026-06-10T14:45:30.051014",
+    "total": 600319.74,
+    "details": {
+      "Binance": 438789.57,
+      "Bitfinex": 130010.08,
+      "Kraken": 22379.62,
+      "Gemini": 9138.85,
+      "Crypto.com": 1.62
+    }
+  },
+  {
+    "timestamp": "2026-06-10T19:43:49.506902",
+    "total": 601177.65,
+    "details": {
+      "Binance": 439639.31,
+      "Bitfinex": 130010.08,
+      "Kraken": 22387.8,
+      "Gemini": 9138.85,
+      "Crypto.com": 1.62
+    }
+  },
+  {
+    "timestamp": "2026-06-10T20:20:47.217611",
+    "total": 257738.06,
+    "details": {
+      "Binance": 248597.59,
+      "Gemini": 9138.85,
+      "Crypto.com": 1.62
+    }
+  },
+  {
+    "timestamp": "2026-06-10T20:38:51.404583",
+    "total": 600972.67,
+    "details": {
+      "Binance": 439433.69,
+      "Bitfinex": 130010.08,
+      "Kraken": 22388.43,
+      "Gemini": 9138.85,
+      "Crypto.com": 1.62
+    }
+  },
+  {
+    "timestamp": "2026-06-10T22:09:53.030981",
+    "total": 600023.62,
+    "details": {
+      "Binance": 438352.39,
+      "Bitfinex": 130010.08,
+      "Kraken": 22398.92,
+      "Gemini": 9260.62,
+      "Crypto.com": 1.62
+    }
+  },
+  {
+    "timestamp": "2026-06-10T22:29:53.411447",
+    "total": 599871.59,
+    "details": {
+      "Binance": 438200.35,
+      "Bitfinex": 130010.08,
+      "Kraken": 22398.93,
+      "Gemini": 9260.62,
+      "Crypto.com": 1.62
+    }
+  },
+  {
+    "timestamp": "2026-06-10T22:55:13.429158",
+    "total": 601292.15,
+    "details": {
+      "Binance": 439620.88,
+      "Bitfinex": 130010.08,
+      "Kraken": 22398.96,
+      "Gemini": 9260.62,
+      "Crypto.com": 1.62
+    }
+  },
+  {
+    "timestamp": "2026-06-10T23:19:43.927178",
+    "total": 601248.1,
+    "details": {
+      "Binance": 439576.83,
+      "Bitfinex": 130010.08,
+      "Kraken": 22398.96,
+      "Gemini": 9260.62,
+      "Crypto.com": 1.62
+    }
+  },
+  {
+    "timestamp": "2026-06-11T01:17:40.631547",
+    "total": 417192.9,
+    "details": {
+      "Binance": 264645.19,
+      "Bitfinex": 130010.08,
+      "Kraken": 22536.01,
+      "Crypto.com": 1.62
+    }
+  },
+  {
+    "timestamp": "2026-06-11T04:55:05.184234",
+    "total": 601711.81,
+    "details": {
+      "Binance": 439525.8,
+      "Bitfinex": 130010.08,
+      "Kraken": 22797.37,
+      "Gemini": 9376.94,
+      "Crypto.com": 1.62
+    }
+  },
+  {
+    "timestamp": "2026-06-11T06:44:57.413873",
+    "total": 602620.29,
+    "details": {
+      "Binance": 440360.52,
+      "Bitfinex": 130010.08,
+      "Kraken": 22871.14,
+      "Gemini": 9376.94,
+      "Crypto.com": 1.62
+    }
+  },
+  {
+    "timestamp": "2026-06-11T06:48:07.740846",
+    "total": 602620.29,
+    "details": {
+      "Binance": 440360.52,
+      "Bitfinex": 130010.08,
+      "Kraken": 22871.14,
+      "Gemini": 9376.94,
+      "Crypto.com": 1.62
+    }
+  },
+  {
+    "timestamp": "2026-06-11T09:23:34.782205",
+    "total": 602674.94,
+    "details": {
+      "Binance": 440369.92,
+      "Bitfinex": 130010.08,
+      "Kraken": 22916.39,
+      "Gemini": 9376.94,
+      "Crypto.com": 1.62
+    }
   }
 ]

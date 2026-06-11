@@ -2666,3 +2666,134 @@ body::before {
     color: #6b5a44;
     background: rgba(0,0,0,0.025);
 }
+
+/* ============================================================
+   评分历史 & 今日变化
+   ============================================================ */
+.score-history-layout {
+    display: grid;
+    grid-template-columns: 1.8fr 1fr;
+    gap: 20px;
+}
+@media (max-width: 900px) {
+    .score-history-layout { grid-template-columns: 1fr; }
+}
+.signal-change-item {
+    padding: 9px 10px;
+    margin-bottom: 8px;
+    background: var(--bg-glass);
+    border-radius: 8px;
+    border-left: 3px solid rgba(128, 128, 128, 0.3);
+}
+.signal-change-item.total {
+    border-left-color: #f7931a;
+    background: rgba(247, 147, 26, 0.06);
+}
+.signal-change-item.total.band-changed {
+    border-left-color: #f7931a;
+    background: rgba(247, 147, 26, 0.14);
+    box-shadow: 0 0 12px rgba(247, 147, 26, 0.15);
+}
+
+/* ============================================================
+   衍生品杠杆面板
+   ============================================================ */
+.deriv-regime {
+    padding: 12px 14px;
+    background: var(--bg-glass);
+    border-radius: 8px;
+    margin-bottom: 14px;
+}
+.deriv-regime-label {
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+.deriv-regime-desc {
+    margin-top: 4px;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+.deriv-stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+.deriv-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    background: var(--bg-glass);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+.deriv-stat-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+.deriv-stat-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+.deriv-stat-sub {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+}
+
+/* ============================================================
+   ETF 日度净流入
+   ============================================================ */
+.etf-flow-stats {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 10px;
+}
+.etf-flow-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.etf-flow-label {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+.etf-flow-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+.etf-bars-row {
+    display: flex;
+    align-items: stretch;
+    gap: 3px;
+    height: 90px;
+}
+.etf-bar-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    cursor: default;
+}
+.etf-bar-half {
+    flex: 1;
+    display: flex;
+    position: relative;
+}
+.etf-bar-half.top { align-items: flex-end; border-bottom: 1px solid var(--border-color); }
+.etf-bar-half.bottom { align-items: flex-start; }
+.etf-bar {
+    width: 100%;
+    border-radius: 2px;
+    opacity: 0.85;
+    transition: opacity 0.2s;
+}
+.etf-bar-col:hover .etf-bar { opacity: 1; }
+.etf-bar-date {
+    font-size: 0.58rem;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 2px;
+    overflow: hidden;
+    white-space: nowrap;
+}

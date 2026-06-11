@@ -167,6 +167,22 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(fetchDashboardData, REFRESH_INTERVAL);
     setTimeout(fetchBuildersData, 5000); // 延迟 5s，等待后台缓存预热
     setInterval(fetchBuildersData, 30 * 60 * 1000); // 每 30 分钟刷新
+
+    // 评分历史 + 衍生品面板
+    setTimeout(() => fetchScoreHistory(_scoreHistoryDays), 1500);
+    setInterval(() => fetchScoreHistory(_scoreHistoryDays), REFRESH_INTERVAL);
+    setTimeout(fetchDerivativesData, 2500);
+    setInterval(fetchDerivativesData, 10 * 60 * 1000); // 每 10 分钟刷新
+
+    // 评分历史天数切换
+    document.querySelectorAll('#scoreHistoryTabs .dtab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#scoreHistoryTabs .dtab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            _scoreHistoryDays = parseInt(btn.dataset.shdays, 10);
+            fetchScoreHistory(_scoreHistoryDays);
+        });
+    });
 });
 
 // 刷新按钮点击事件（同时刷新指标和资讯）
@@ -174,6 +190,8 @@ document.getElementById('refreshBtn')?.addEventListener('click', () => {
     fetchDashboardData();
     fetchNewsData();
     fetchBuildersData();
+    fetchScoreHistory(_scoreHistoryDays);
+    fetchDerivativesData();
 });
 
 async function fetchBuildersData() {
@@ -1142,6 +1160,8 @@ async function fetchNewsData() {
         if (data.exchange_balance) renderExchangeBalance(data.exchange_balance);
         if (data.calendar && data.calendar.length > 0) renderMacroCalendar(data.calendar);
         if (data.news && data.news.length > 0) renderCryptoNews(data.news);
+        renderEtfFlow(data.etf_flow);
+        renderDatHoldings(data.dat_holdings);
         const updatedEl = document.getElementById('newsUpdatedAt');
         if (updatedEl) {
             const now = new Date();
@@ -1663,3 +1683,480 @@ document.querySelectorAll('.dtab').forEach(btn => {
         }
     });
 });
+
+/* ============================================================
+   评分历史 & 今日信号变化
+   ============================================================ */
+
+let _scoreHistoryDays = 90;
+let _scoreHistoryChart = null;
+
+async function fetchScoreHistory(days) {
+    try {
+        const res = await fetch(`/api/score-history?days=${days || 90}`);
+        const data = await res.json();
+        if (!data.success) return;
+        renderScoreHistoryChart(data.series || []);
+        renderSignalChanges(data.changes || {});
+    } catch (e) {
+        console.error('Score history fetch failed:', e);
+    }
+}
+
+function renderScoreHistoryChart(series) {
+    const canvas = document.getElementById('scoreHistoryChart');
+    const emptyEl = document.getElementById('scoreHistoryEmpty');
+    if (!canvas) return;
+
+    if (!series || series.length < 2) {
+        canvas.style.display = 'none';
+        if (emptyEl) emptyEl.style.display = 'block';
+        return;
+    }
+    canvas.style.display = '';
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    if (_scoreHistoryChart) {
+        _scoreHistoryChart.destroy();
+        _scoreHistoryChart = null;
+    }
+
+    const labels = series.map(s => s.date.slice(5)); // MM-DD
+    const scores = series.map(s => s.total_score);
+    const prices = series.map(s => s.btc_price);
+
+    _scoreHistoryChart = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: '综合评分',
+                    data: scores,
+                    borderColor: '#f7931a',
+                    backgroundColor: '#f7931a18',
+                    borderWidth: 2,
+                    pointRadius: series.length > 60 ? 0 : 2,
+                    fill: true,
+                    tension: 0.3,
+                    yAxisID: 'yScore',
+                },
+                {
+                    label: 'BTC 价格',
+                    data: prices,
+                    borderColor: '#4488ff',
+                    borderWidth: 1.5,
+                    borderDash: [4, 3],
+                    pointRadius: 0,
+                    fill: false,
+                    tension: 0.3,
+                    yAxisID: 'yPrice',
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    display: true,
+                    labels: { color: '#888', font: { size: 10 }, boxWidth: 16 }
+                },
+                tooltip: {
+                    callbacks: {
+                        afterBody: (items) => {
+                            const i = items[0].dataIndex;
+                            return series[i].recommendation ? `建议: ${series[i].recommendation}` : '';
+                        }
+                    }
+                },
+                annotation: {
+                    annotations: {
+                        zero: {
+                            type: 'line', yMin: 0, yMax: 0, yScaleID: 'yScore',
+                            borderColor: '#888', borderWidth: 1, borderDash: [2, 4]
+                        },
+                        buy: {
+                            type: 'line', yMin: 0.382, yMax: 0.382, yScaleID: 'yScore',
+                            borderColor: '#00ff8866', borderWidth: 1, borderDash: [4, 4],
+                            label: { content: '买入 0.382', display: true, position: 'start', color: '#00ff88', font: { size: 9 }, backgroundColor: 'transparent' }
+                        },
+                        reduce: {
+                            type: 'line', yMin: -0.382, yMax: -0.382, yScaleID: 'yScore',
+                            borderColor: '#ff446666', borderWidth: 1, borderDash: [4, 4],
+                            label: { content: '卖出 -0.382', display: true, position: 'start', color: '#ff4466', font: { size: 9 }, backgroundColor: 'transparent' }
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: '#666', maxTicksLimit: 10, font: { size: 10 } },
+                    grid: { display: false }
+                },
+                yScore: {
+                    position: 'left',
+                    min: -1, max: 1,
+                    ticks: { color: '#f7931a', font: { size: 10 } },
+                    grid: { color: 'rgba(128,128,128,0.12)' }
+                },
+                yPrice: {
+                    position: 'right',
+                    ticks: {
+                        color: '#4488ff', font: { size: 10 },
+                        callback: (v) => '$' + (v >= 1000 ? (v / 1000).toFixed(0) + 'K' : v)
+                    },
+                    grid: { display: false }
+                }
+            }
+        }
+    });
+}
+
+function renderSignalChanges(changes) {
+    const container = document.getElementById('signalChanges');
+    const meta = document.getElementById('signalChangesMeta');
+    if (!container) return;
+
+    if (!changes || !changes.prev_date) {
+        container.innerHTML = '<p style="color:#888; font-size:0.85rem;">📭 暂无对比基准，明天起自动显示与前一日的信号变化</p>';
+        if (meta) meta.textContent = '';
+        return;
+    }
+
+    if (meta) meta.textContent = `vs ${changes.prev_date}`;
+
+    let html = '';
+
+    // 综合评分变化
+    const t = changes.total;
+    if (t) {
+        const deltaCls = t.delta > 0 ? 'positive' : t.delta < 0 ? 'negative' : 'neutral';
+        const deltaColor = t.delta > 0 ? '#00ff88' : t.delta < 0 ? '#ff4466' : '#888';
+        const arrow = t.delta > 0 ? '▲' : t.delta < 0 ? '▼' : '—';
+        html += `
+            <div class="signal-change-item total ${t.band_changed ? 'band-changed' : ''}">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-weight:600; color:var(--text-primary);">综合评分</span>
+                    <span style="color:${deltaColor}; font-weight:600;">
+                        ${t.prev_score.toFixed(2)} → ${t.curr_score.toFixed(2)} ${arrow}
+                    </span>
+                </div>
+                ${t.band_changed
+                    ? `<div style="margin-top:4px; font-size:0.8rem; color:#f7931a;">⚡ 档位变化: ${t.prev_band} → <b>${t.curr_band}</b></div>`
+                    : `<div style="margin-top:4px; font-size:0.78rem; color:var(--text-muted);">档位维持「${t.curr_band}」</div>`}
+            </div>`;
+    }
+
+    // 指标跨档变化
+    const inds = changes.indicators || [];
+    if (inds.length === 0) {
+        html += '<p style="color:#888; font-size:0.82rem; margin-top:8px;">✅ 各指标信号与前一日一致，无跨档变化</p>';
+    } else {
+        html += inds.map(c => {
+            const isBull = c.direction === 'bullish';
+            const color = isBull ? '#00ff88' : '#ff4466';
+            const icon = isBull ? '🟢' : '🔴';
+            const dirText = isBull ? '转多' : '转空';
+            return `
+                <div class="signal-change-item">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="color:var(--text-primary); font-size:0.85rem;">${icon} ${c.name}</span>
+                        <span style="color:${color}; font-size:0.8rem; font-weight:600;">
+                            ${c.prev_score} → ${c.curr_score}（${dirText}）
+                        </span>
+                    </div>
+                    ${c.curr_status ? `<div style="margin-top:3px; font-size:0.74rem; color:var(--text-muted);">${c.curr_status}</div>` : ''}
+                </div>`;
+        }).join('');
+    }
+
+    container.innerHTML = html;
+}
+
+/* ============================================================
+   衍生品杠杆面板
+   ============================================================ */
+
+let _derivOiChart = null;
+
+async function fetchDerivativesData() {
+    await fetchWithComputingPoll('/api/derivatives', {
+        pollKey: '_derivativesPollTimer',
+        maxWaitMs: 3 * 60 * 1000,
+        delays: [5000, 10000, 20000, 30000],
+        onData: renderDerivatives,
+        onError: (e) => console.error('Derivatives fetch failed:', e),
+    });
+}
+
+function _fmtUsdB(v) {
+    if (v === null || v === undefined) return '--';
+    if (Math.abs(v) >= 1e9) return '$' + (v / 1e9).toFixed(2) + 'B';
+    if (Math.abs(v) >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+    return '$' + Math.round(v).toLocaleString();
+}
+
+function _pctSpan(v, inverse) {
+    if (v === null || v === undefined) return '<span style="color:#888;">--</span>';
+    const positive = inverse ? v < 0 : v > 0;
+    const color = v === 0 ? '#888' : positive ? '#00ff88' : '#ff4466';
+    const sign = v > 0 ? '+' : '';
+    return `<span style="color:${color}; font-weight:600;">${sign}${v.toFixed(2)}%</span>`;
+}
+
+function renderDerivatives(data) {
+    const panel = document.getElementById('derivativesPanel');
+    if (!panel) return;
+
+    const updatedEl = document.getElementById('derivUpdatedAt');
+    if (updatedEl && data.updated_at) updatedEl.textContent = `更新于 ${data.updated_at}`;
+
+    const regime = data.regime || {};
+    const toneColors = {
+        bullish: '#00ff88', bearish: '#ff4466',
+        warning: '#ff9800', neutral: '#888'
+    };
+    const rColor = toneColors[regime.tone] || '#888';
+
+    // ── 顶部：行情性质徽章 ──
+    const regimeHtml = `
+        <div class="deriv-regime" style="border-left: 3px solid ${rColor};">
+            <div class="deriv-regime-label" style="color:${rColor};">${regime.label || '--'}</div>
+            <div class="deriv-regime-desc">${regime.desc || ''}</div>
+        </div>`;
+
+    // ── 统计卡片 ──
+    const oi = data.oi, fd = data.funding, ls = data.long_short, liq = data.liquidations, px = data.price;
+    const cards = [];
+
+    if (px) {
+        cards.push(`
+            <div class="deriv-stat">
+                <span class="deriv-stat-label">BTC 24h</span>
+                <span class="deriv-stat-value">${_pctSpan(px.change_24h_pct)}</span>
+                <span class="deriv-stat-sub">$${Math.round(px.last).toLocaleString()}</span>
+            </div>`);
+    }
+    if (oi) {
+        cards.push(`
+            <div class="deriv-stat">
+                <span class="deriv-stat-label">未平仓合约 OI</span>
+                <span class="deriv-stat-value" style="color:var(--text-primary);">${_fmtUsdB(oi.current_usd)}</span>
+                <span class="deriv-stat-sub">24h ${_pctSpan(oi.change_24h_pct)} · 7d ${_pctSpan(oi.change_7d_pct)}</span>
+            </div>`);
+    }
+    if (fd) {
+        const frColor = fd.rate_pct > 0.03 ? '#ff9800' : fd.rate_pct < -0.03 ? '#00ff88' : '#888';
+        cards.push(`
+            <div class="deriv-stat">
+                <span class="deriv-stat-label">资金费率 (8h)</span>
+                <span class="deriv-stat-value" style="color:${frColor};">${fd.rate_pct.toFixed(4)}%</span>
+                <span class="deriv-stat-sub">年化 ${fd.annualized_pct}%${fd.next_time ? ` · 下次 ${fd.next_time}` : ''}</span>
+            </div>`);
+    }
+    if (ls) {
+        const lsColor = ls.ratio > 1.5 ? '#ff9800' : ls.ratio < 0.7 ? '#00ff88' : '#888';
+        cards.push(`
+            <div class="deriv-stat">
+                <span class="deriv-stat-label">多空账户比</span>
+                <span class="deriv-stat-value" style="color:${lsColor};">${ls.ratio}</span>
+                <span class="deriv-stat-sub">多 ${ls.long_pct}% / 空 ${ls.short_pct}%</span>
+            </div>`);
+    }
+    if (liq && liq.total_usd > 0) {
+        const longShare = liq.total_usd > 0 ? (liq.long_usd / liq.total_usd * 100) : 50;
+        cards.push(`
+            <div class="deriv-stat" title="${liq.note || ''}">
+                <span class="deriv-stat-label">清算样本</span>
+                <span class="deriv-stat-value" style="color:var(--text-primary);">${_fmtUsdB(liq.total_usd)}</span>
+                <span class="deriv-stat-sub">
+                    <span style="color:#ff4466;">多单 ${longShare.toFixed(0)}%</span> /
+                    <span style="color:#00ff88;">空单 ${(100 - longShare).toFixed(0)}%</span>
+                </span>
+            </div>`);
+    }
+
+    panel.innerHTML = `
+        ${regimeHtml}
+        <div class="deriv-stats-row">${cards.join('')}</div>
+        ${oi && oi.history && oi.history.length > 2 ? `
+            <div style="margin-top:14px;">
+                <div style="font-size:0.78rem; color:var(--text-muted); margin-bottom:6px;">
+                    OI 走势（30 天 · ${oi.source}）vs BTC 价格
+                </div>
+                <div style="position:relative; height:200px;">
+                    <canvas id="derivOiChart"></canvas>
+                </div>
+            </div>` : ''}
+    `;
+
+    // ── OI 历史图 ──
+    if (oi && oi.history && oi.history.length > 2) {
+        if (_derivOiChart) { _derivOiChart.destroy(); _derivOiChart = null; }
+        const canvas = document.getElementById('derivOiChart');
+        if (canvas) {
+            _derivOiChart = new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: oi.history.map(h => h.date),
+                    datasets: [
+                        {
+                            label: 'OI (USD)',
+                            data: oi.history.map(h => h.oi_usd),
+                            borderColor: '#f7931a',
+                            backgroundColor: '#f7931a15',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            fill: true,
+                            tension: 0.3,
+                            yAxisID: 'yOi',
+                        },
+                        {
+                            label: 'BTC 价格',
+                            data: oi.history.map(h => h.price),
+                            borderColor: '#4488ff',
+                            borderWidth: 1.5,
+                            borderDash: [4, 3],
+                            pointRadius: 0,
+                            fill: false,
+                            tension: 0.3,
+                            yAxisID: 'yPx',
+                            spanGaps: true,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: true, labels: { color: '#888', font: { size: 10 }, boxWidth: 16 } },
+                        tooltip: {
+                            callbacks: {
+                                label: (item) => item.dataset.yAxisID === 'yOi'
+                                    ? `OI: ${_fmtUsdB(item.raw)}`
+                                    : `价格: $${Math.round(item.raw).toLocaleString()}`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#666', maxTicksLimit: 10, font: { size: 10 } }, grid: { display: false } },
+                        yOi: {
+                            position: 'left',
+                            ticks: { color: '#f7931a', font: { size: 10 }, callback: (v) => '$' + (v / 1e9).toFixed(0) + 'B' },
+                            grid: { color: 'rgba(128,128,128,0.12)' }
+                        },
+                        yPx: {
+                            position: 'right',
+                            ticks: { color: '#4488ff', font: { size: 10 }, callback: (v) => '$' + (v / 1000).toFixed(0) + 'K' },
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+        }
+    }
+}
+
+/* ============================================================
+   ETF 日度净流入
+   ============================================================ */
+
+function renderEtfFlow(etf) {
+    const panel = document.getElementById('etfFlowPanel');
+    if (!panel) return;
+
+    if (!etf || !etf.series || etf.series.length === 0) {
+        // 数据源不可用，保留原有链接引导文案
+        return;
+    }
+
+    const series = etf.series;
+    const maxAbs = Math.max(...series.map(s => Math.abs(s.total)), 1);
+    const latest = etf.latest || {};
+    const latestColor = (latest.total || 0) >= 0 ? '#00ff88' : '#ff4466';
+    const sum5Color = (etf.sum_5d || 0) >= 0 ? '#00ff88' : '#ff4466';
+
+    const fmtM = (v) => {
+        if (v === null || v === undefined) return '--';
+        const sign = v > 0 ? '+' : '';
+        return Math.abs(v) >= 1000 ? `${sign}${(v / 1000).toFixed(2)}B` : `${sign}${v.toFixed(0)}M`;
+    };
+
+    // 柱状图（纯 CSS，红绿柱以中线为基准）
+    const barsHtml = series.map(s => {
+        const positive = s.total >= 0;
+        const hPct = Math.min(100, Math.abs(s.total) / maxAbs * 100);
+        const color = positive ? '#00ff88' : '#ff4466';
+        const fundsTip = Object.entries(s.funds || {})
+            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+            .slice(0, 5)
+            .map(([k, v]) => `${k}: ${v > 0 ? '+' : ''}${v}M`)
+            .join('  ');
+        return `
+            <div class="etf-bar-col" title="${s.date}  净流${positive ? '入' : '出'} ${Math.abs(s.total).toFixed(0)}M${fundsTip ? '\n' + fundsTip : ''}">
+                <div class="etf-bar-half top">${positive ? `<div class="etf-bar" style="height:${hPct}%; background:${color};"></div>` : ''}</div>
+                <div class="etf-bar-half bottom">${!positive ? `<div class="etf-bar" style="height:${hPct}%; background:${color};"></div>` : ''}</div>
+                <span class="etf-bar-date">${s.date.slice(3)}</span>
+            </div>`;
+    }).join('');
+
+    panel.innerHTML = `
+        <div class="etf-flow-stats">
+            <div class="etf-flow-stat">
+                <span class="etf-flow-label">最新 (${latest.date || '--'})</span>
+                <span class="etf-flow-value" style="color:${latestColor};">${fmtM(latest.total)}</span>
+            </div>
+            <div class="etf-flow-stat">
+                <span class="etf-flow-label">近5日累计</span>
+                <span class="etf-flow-value" style="color:${sum5Color};">${fmtM(etf.sum_5d)}</span>
+            </div>
+            <div class="etf-flow-stat">
+                <span class="etf-flow-label">${series.length}日累计</span>
+                <span class="etf-flow-value" style="color:${(etf.sum_total || 0) >= 0 ? '#00ff88' : '#ff4466'};">${fmtM(etf.sum_total)}</span>
+            </div>
+            ${etf.cum_total ? `
+            <div class="etf-flow-stat">
+                <span class="etf-flow-label">上市累计</span>
+                <span class="etf-flow-value" style="color:var(--text-primary);">$${(etf.cum_total / 1000).toFixed(1)}B</span>
+            </div>` : ''}
+        </div>
+        <div class="etf-bars-row">${barsHtml}</div>
+        <p style="margin:8px 0 0; color:var(--text-muted); font-size:0.68rem; text-align:right;">
+            单位: 百万美元 · 数据源 ${etf.source} · 更新 ${etf.updated_at}
+        </p>
+    `;
+}
+
+/* ============================================================
+   DAT 公司持仓（CoinGecko 动态数据）
+   ============================================================ */
+
+function renderDatHoldings(data) {
+    const panel = document.getElementById('datHoldings');
+    if (!panel) return;
+
+    if (!data || !data.companies || data.companies.length === 0) {
+        // API 失败 → 保留 HTML 内置静态回退表
+        return;
+    }
+
+    const hdr = (txt, align) => `<span style="color: #555; font-size: 0.7rem; padding-bottom: 4px; border-bottom: 1px solid #2a3040;${align ? ' text-align: right;' : ''}">${txt}</span>`;
+    const rows = data.companies.map(c => `
+        <span title="${c.pct_supply ? `占总供应量 ${c.pct_supply}%` : ''}">${c.name}</span>
+        <span style="text-align:right; color:#f7931a;">${c.holdings.toLocaleString()}</span>
+        <span style="text-align:right; color:#555;">${c.symbol}</span>
+    `).join('');
+
+    panel.innerHTML = `
+        <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; align-items: center;">
+            ${hdr('公司')}${hdr('持仓 (BTC)', true)}${hdr('代码', true)}
+            ${rows}
+        </div>
+        <p style="margin: 10px 0 0; color: #444; font-size: 0.68rem; text-align: right;">
+            上市公司合计 ${data.total.toLocaleString()} BTC · CoinGecko · ${data.updated_at}
+        </p>
+    `;
+}

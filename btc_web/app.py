@@ -16,7 +16,7 @@ import threading
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask, render_template, jsonify, request, make_response
-from datetime import datetime
+from datetime import datetime, timedelta
 import numpy as np
 
 
@@ -83,8 +83,11 @@ from btc_dashboard import (
     get_sparklines,
     fetch_crypto_news, fetch_whale_activity, fetch_macro_calendar,
     fetch_crypto_calendar, fetch_whale_volume_stats, fetch_exchange_balance_display,
-    fetch_builders_feed
+    fetch_builders_feed, fetch_dat_holdings
 )
+from btc_dashboard.score_history import record_score_snapshot, get_score_history
+from btc_dashboard.derivatives import fetch_derivatives_panel
+from btc_dashboard.etf_flow import fetch_etf_flow_history
 
 app = Flask(__name__)
 
@@ -113,6 +116,13 @@ _builders_cache_timestamp = None
 _builders_refreshing = False
 _builders_lock = threading.Lock()
 _BUILDERS_TTL = 3600              # 1 小时（与摘要刷新对齐）
+
+# ── 衍生品面板缓存（stale-while-revalidate，10 分钟 TTL）────────────
+_derivatives_cache = None
+_derivatives_cache_timestamp = None
+_derivatives_refreshing = False
+_derivatives_lock = threading.Lock()
+_DERIVATIVES_TTL = 600            # 10 分钟
 
 
 def _do_refresh_dashboard():
@@ -148,6 +158,11 @@ def _do_refresh_dashboard():
         }
         _dashboard_cache_timestamp = datetime.now()
         _save_cache_to_disk("dashboard", _dashboard_cache, _dashboard_cache_timestamp)
+        # 记录每日评分快照（用于评分历史曲线 + 今日信号变化）
+        try:
+            record_score_snapshot(_dashboard_cache, _CACHE_DIR)
+        except Exception as e:
+            print(f"⚠️ 评分快照记录失败: {e}")
         print(f"✅ 仪表盘缓存刷新完成 {_dashboard_cache_timestamp.strftime('%H:%M:%S')}")
     except Exception as e:
         global _last_error
@@ -182,9 +197,11 @@ def _do_refresh_news():
             "exchange_balance": lambda: fetch_exchange_balance_display(),
             "calendar":         lambda: fetch_macro_calendar(),
             "crypto_calendar":  lambda: fetch_crypto_calendar(),
+            "etf_flow":         lambda: fetch_etf_flow_history(limit=15),
+            "dat_holdings":     lambda: fetch_dat_holdings(limit=8),
         }
         results = {}
-        with ThreadPoolExecutor(max_workers=6) as pool:
+        with ThreadPoolExecutor(max_workers=8) as pool:
             futures = {pool.submit(fn): key for key, fn in tasks.items()}
             for future in as_completed(futures):
                 key = futures[future]
@@ -193,10 +210,19 @@ def _do_refresh_news():
                 except Exception as e:
                     print(f"⚠️ {key} 获取失败: {e}")
                     results[key] = [] if key in ("news", "whales", "calendar", "crypto_calendar") else {}
+        # 某个源抓取为空时保留旧缓存值，避免瞬时网络故障把空结果写进缓存
+        old = _news_cache or {}
+        for key in list(results.keys()):
+            if not results[key] and old.get(key):
+                print(f"⚠️ {key} 本次为空，沿用旧缓存")
+                results[key] = old[key]
         _news_cache = results
         _news_cache_timestamp = datetime.now()
+        if not results.get("news"):
+            # 快讯仍为空 → 缩短有效期，约 2 分钟后下次请求自动重试
+            _news_cache_timestamp -= timedelta(seconds=_NEWS_TTL - 120)
         _save_cache_to_disk("news", _news_cache, _news_cache_timestamp)
-        print(f"✅ 资讯缓存刷新完成 {_news_cache_timestamp.strftime('%H:%M:%S')}")
+        print(f"✅ 资讯缓存刷新完成 {datetime.now().strftime('%H:%M:%S')}")
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -220,6 +246,18 @@ def _do_refresh_builders():
     global _builders_cache, _builders_cache_timestamp, _builders_refreshing
     try:
         data = fetch_builders_feed(limit=30)
+        if not data.get("total"):
+            # 全部源为空：视为抓取失败
+            if _builders_cache and _builders_cache.get("total"):
+                # 保留旧数据且不更新时间戳 → 缓存仍过期，下次请求继续触发重试
+                print("⚠️ 开发者动态抓取为空，保留旧缓存")
+                return
+            # 无可用旧数据：缓存空结果但缩短有效期，约 2 分钟后自动重试
+            _builders_cache = data
+            _builders_cache_timestamp = datetime.now() - timedelta(seconds=_BUILDERS_TTL - 120)
+            _save_cache_to_disk("builders", _builders_cache, _builders_cache_timestamp)
+            print("⚠️ 开发者动态抓取为空（无旧缓存），2 分钟后重试")
+            return
         _builders_cache = data
         _builders_cache_timestamp = datetime.now()
         _save_cache_to_disk("builders", _builders_cache, _builders_cache_timestamp)
@@ -240,6 +278,34 @@ def trigger_builders_refresh():
             return
         _builders_refreshing = True
     t = threading.Thread(target=_do_refresh_builders, daemon=True)
+    t.start()
+
+
+def _do_refresh_derivatives():
+    """在后台线程中刷新衍生品面板缓存。"""
+    global _derivatives_cache, _derivatives_cache_timestamp, _derivatives_refreshing
+    try:
+        data = fetch_derivatives_panel()
+        _derivatives_cache = data
+        _derivatives_cache_timestamp = datetime.now()
+        _save_cache_to_disk("derivatives", _derivatives_cache, _derivatives_cache_timestamp)
+        print(f"✅ 衍生品面板缓存刷新完成 {_derivatives_cache_timestamp.strftime('%H:%M:%S')}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"⚠️ 衍生品面板缓存刷新失败: {e}")
+    finally:
+        _derivatives_refreshing = False
+
+
+def trigger_derivatives_refresh():
+    """触发后台刷新衍生品面板（若未在刷新中）。"""
+    global _derivatives_refreshing
+    with _derivatives_lock:
+        if _derivatives_refreshing:
+            return
+        _derivatives_refreshing = True
+    t = threading.Thread(target=_do_refresh_derivatives, daemon=True)
     t.start()
 
 
@@ -281,6 +347,13 @@ def _bootstrap_disk_cache():
         _builders_cache_timestamp = b_ts
         print(f"📦 从磁盘恢复开发者动态缓存（{b_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
 
+    global _derivatives_cache, _derivatives_cache_timestamp
+    dv_data, dv_ts = _load_cache_from_disk("derivatives")
+    if dv_data is not None:
+        _derivatives_cache = dv_data
+        _derivatives_cache_timestamp = dv_ts
+        print(f"📦 从磁盘恢复衍生品面板缓存（{dv_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
+
 _bootstrap_disk_cache()
 
 
@@ -290,7 +363,9 @@ def _delayed_warmup():
     _t.sleep(5)
     trigger_dashboard_refresh()
     trigger_news_refresh()
-    _t.sleep(15)
+    _t.sleep(10)
+    trigger_derivatives_refresh()
+    _t.sleep(5)
     trigger_builders_refresh()
 
 threading.Thread(target=_delayed_warmup, daemon=True).start()
@@ -381,6 +456,57 @@ def api_history(indicator_name: str):
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/score-history')
+def api_score_history():
+    """API 端点：返回综合评分历史时序 + 今日信号变化"""
+    try:
+        days = request.args.get('days', 90, type=int)
+        days = min(max(days, 7), 365)
+        data = get_score_history(_CACHE_DIR, days)
+        resp = jsonify({"success": True, **data})
+        resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=600'
+        return resp
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/derivatives')
+def api_derivatives():
+    """
+    API 端点：返回衍生品杠杆面板数据（OI / 资金费率 / 多空比 / 行情性质）
+    策略：stale-while-revalidate，同 /api/dashboard
+    """
+    global _derivatives_cache, _derivatives_cache_timestamp
+
+    now = datetime.now()
+    cache_age = int((now - _derivatives_cache_timestamp).total_seconds()) if _derivatives_cache_timestamp else None
+    has_cache = _derivatives_cache is not None
+
+    if has_cache:
+        if cache_age is not None and cache_age >= _DERIVATIVES_TTL:
+            trigger_derivatives_refresh()
+        resp = jsonify({
+            "success": True,
+            "cached": True,
+            "cache_age_s": cache_age,
+            **_derivatives_cache
+        })
+        fresh_left = max(0, _DERIVATIVES_TTL - (cache_age or 0))
+        return _swr_headers(resp, fresh_left, _DERIVATIVES_TTL)
+
+    # 无缓存（冷启动）：立即返回 computing 状态，前端负责轮询
+    trigger_derivatives_refresh()
+    resp = jsonify({
+        "success": False,
+        "computing": True,
+        "error": "衍生品数据加载中，请稍候…"
+    })
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp, 202
 
 
 @app.route('/api/news')

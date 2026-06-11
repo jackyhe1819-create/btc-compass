@@ -38,6 +38,7 @@ from .indicators_aux import (
     calc_btc_dominance, calc_etf_flow, calc_mnav, calc_company_holdings,
     calc_exchange_reserve, calc_max_pain,
     fetch_etf_volume, fetch_company_holdings_data, fetch_mstr_price,
+    fetch_dat_holdings,
 )
 
 # 资讯 / 鲸鱼 / 日历
@@ -84,6 +85,7 @@ __all__ = [
     "calc_btc_dominance", "calc_etf_flow", "calc_mnav", "calc_company_holdings",
     "calc_exchange_reserve", "calc_max_pain",
     "fetch_etf_volume", "fetch_company_holdings_data", "fetch_mstr_price",
+    "fetch_dat_holdings",
     # 资讯/鲸鱼/日历
     "fetch_crypto_news",
     "fetch_exchange_balance_display", "fetch_whale_volume_stats", "fetch_whale_activity",

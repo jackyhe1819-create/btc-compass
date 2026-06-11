@@ -16,7 +16,7 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>₿</text></svg>">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=21-summary">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=22-panels">
     <!-- 防止主题闪烁：在 CSS 加载前立即恢复主题（v2: 默认米白色） -->
     <script>
         (function() {
@@ -317,6 +317,65 @@
     </div>
     </section>
 
+    <!-- 评分历史 & 今日变化模块 -->
+    <section class="score-history-section" style="margin-top: 30px;">
+        <h2 class="section-title">
+            <span class="icon">📈</span>
+            评分历史 & 今日变化
+            <span style="font-size: 0.75rem; color: #888; font-weight: normal; margin-left: 10px;">
+                综合评分趋势 · 指标跨档信号
+            </span>
+        </h2>
+        <div class="score-history-layout">
+            <!-- 左：评分历史曲线 -->
+            <div class="news-card score-history-chart-card">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+                    <h3 style="color: #f79322; font-size: 1.0rem; margin:0;">综合评分走势 vs BTC 价格</h3>
+                    <div class="drawer-tabs" id="scoreHistoryTabs">
+                        <button class="dtab" data-shdays="30">30天</button>
+                        <button class="dtab active" data-shdays="90">90天</button>
+                        <button class="dtab" data-shdays="180">180天</button>
+                    </div>
+                </div>
+                <div style="position:relative; height:240px;">
+                    <canvas id="scoreHistoryChart"></canvas>
+                </div>
+                <p id="scoreHistoryEmpty" style="display:none; color:#888; font-size:0.85rem; text-align:center; padding:30px 0;">
+                    📭 历史数据从今天开始累积，每天刷新后自动记录一条快照
+                </p>
+            </div>
+            <!-- 右：今日信号变化 -->
+            <div class="news-card signal-changes-card">
+                <h3 style="color: #f79322; font-size: 1.0rem; margin:0 0 10px;">
+                    🔔 今日信号变化
+                    <span id="signalChangesMeta" style="font-size:0.72rem; color:#888; font-weight:normal; margin-left:8px;"></span>
+                </h3>
+                <div id="signalChanges" class="news-list" style="max-height: 280px; overflow-y: auto;">
+                    <p style="color: #888;">加载中...</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 衍生品杠杆面板 -->
+    <section class="derivatives-section" style="margin-top: 30px;">
+        <h2 class="section-title">
+            <span class="icon">📉</span>
+            衍生品杠杆面板
+            <span style="font-size: 0.75rem; color: #888; font-weight: normal; margin-left: 10px;">
+                OI · 资金费率 · 多空比 · 清算
+            </span>
+            <span id="derivUpdatedAt" style="font-size: 0.72rem; color: #555; font-weight: normal; margin-left: 12px;"></span>
+            <a href="https://www.coinglass.com/zh" target="_blank" rel="noopener noreferrer"
+                style="font-size: 0.75rem; color: #f7931a; font-weight: normal; margin-left: 12px; text-decoration: none; border: 1px solid #f7931a33; padding: 2px 8px; border-radius: 4px;">
+                CoinGlass 完整数据 ↗
+            </a>
+        </h2>
+        <div class="news-card" id="derivativesPanel">
+            <p style="color: #888;">加载中...</p>
+        </div>
+    </section>
+
     <!-- 交易所BTC余额模块 -->
     <section class="exchange-balance-section" style="margin-top: 30px;">
         <h2 class="section-title">
@@ -386,9 +445,11 @@
                             CoinMarketCap ↗
                         </a>
                     </h3>
-                    <p style="color: #888; font-size: 0.85rem; line-height: 1.6;">
-                        点击上方链接查看 BTC ETF 实时资金流入流出、AUM 规模及各产品详情。
-                    </p>
+                    <div id="etfFlowPanel">
+                        <p style="color: #888; font-size: 0.85rem; line-height: 1.6;">
+                            点击上方链接查看 BTC ETF 实时资金流入流出、AUM 规模及各产品详情。
+                        </p>
+                    </div>
                 </div>
 
                 <!-- DAT 动态 -->
@@ -404,8 +465,8 @@
                             Saylor ↗
                         </a>
                     </h3>
-                    <!-- 主要财库公司持仓表 -->
-                    <div style="font-size: 0.78rem; color: #bbb;">
+                    <!-- 主要财库公司持仓表（JS 用 CoinGecko 数据动态替换；API 失败保留此静态回退） -->
+                    <div id="datHoldings" style="font-size: 0.78rem; color: #bbb;">
                         <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; align-items: center;">
                             <!-- Header -->
                             <span style="color: #555; font-size: 0.7rem; padding-bottom: 4px; border-bottom: 1px solid #2a3040;">公司</span>
@@ -420,7 +481,7 @@
                             <span>CleanSpark</span><span style="text-align:right; color:#f7931a;">11,177</span><span style="text-align:right; color:#555;">CLSK</span>
                         </div>
                         <p style="margin: 10px 0 0; color: #444; font-size: 0.68rem; text-align: right;">
-                            数据近似，点击「实时追踪」查看最新增减仓动态
+                            静态参考数据（实时数据加载中），点击「实时追踪」查看最新增减仓动态
                         </p>
                     </div>
                     <!-- mNAV 动态区 -->
@@ -746,7 +807,7 @@
         <p style="margin: 6px 0 0 0; font-size: 0.75rem; color: #666;">点击地址即可复制</p>
     </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}?v=20-summary"></script>
+    <script src="{{ url_for('static', filename='script.js') }}?v=22-dat"></script>
 </body>
 
 </html>

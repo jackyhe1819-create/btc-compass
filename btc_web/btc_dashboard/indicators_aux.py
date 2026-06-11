@@ -440,6 +440,47 @@ def fetch_company_holdings_data() -> Tuple[float, str]:
     return 0.0, "API 暂不可用"
 
 
+def fetch_dat_holdings(limit: int = 8):
+    """
+    上市公司 BTC 持仓 Top N（DAT 卡片用）
+    来源: CoinGecko Public Treasury API（免费）
+    返回 {total, companies:[{name, symbol, holdings, pct_supply}], updated_at}，失败 None
+    """
+    try:
+        r = requests.get(
+            "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin",
+            timeout=15, headers={"User-Agent": "Mozilla/5.0"}
+        )
+        if r.status_code != 200:
+            print(f"⚠️ DAT Holdings API HTTP {r.status_code}")
+            return None
+        data = r.json()
+        companies = []
+        for c in (data.get("companies") or [])[:limit]:
+            sym = (c.get("symbol") or "").strip()
+            if sym.endswith(".US"):
+                sym = sym[:-3]  # MSTR.US → MSTR；3350.T 等非美股保留后缀
+            holdings = c.get("total_holdings")
+            if not c.get("name") or holdings is None:
+                continue
+            companies.append({
+                "name": c["name"],
+                "symbol": sym,
+                "holdings": round(float(holdings)),
+                "pct_supply": c.get("percentage_of_total_supply"),
+            })
+        if not companies:
+            return None
+        return {
+            "total": round(float(data.get("total_holdings") or 0)),
+            "companies": companies,
+            "updated_at": datetime.now().strftime("%m-%d %H:%M"),
+        }
+    except Exception as e:
+        print(f"⚠️ DAT Holdings 获取失败: {e}")
+        return None
+
+
 # ============================================================
 # 新增指标 - 占位符 (需付费/注册)
 # ============================================================
