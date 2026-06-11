@@ -376,6 +376,22 @@ def _delayed_warmup():
 threading.Thread(target=_delayed_warmup, daemon=True).start()
 
 
+# ── 评分历史回填（幂等, 一次性; 失败每 30 分钟重试, 最多 8 次）────────
+def _backfill_worker():
+    import time as _t
+    from btc_dashboard.backfill import ensure_backfilled
+    _t.sleep(30)  # 错开预热高峰, 给 bitcoin-data.com 限额留余量
+    for attempt in range(8):
+        try:
+            ensure_backfilled(_CACHE_DIR, days=90)
+            return
+        except Exception as e:
+            print(f"⚠️ 评分历史回填失败 (第 {attempt+1}/8 次): {e}")
+            _t.sleep(1800)
+
+threading.Thread(target=_backfill_worker, daemon=True).start()
+
+
 _last_error = None  # 记录最近一次后台错误
 
 @app.route('/api/version')
