@@ -49,3 +49,5 @@ archive/
 btc_web/test_*.py
 docs/superpowers/
 compass_server.log
+btc_web/exchange_balance_history.json
+exchange_balance_history.json

@@ -33,14 +33,14 @@ from .core import IndicatorResult, GENESIS_DATE, AHR999_A, AHR999_B
 
 CYCLE_BUCKETS = {
     "趋势伸展": {
-        "weight": 0.30,
+        "weight": 0.25,
         "members": ["Mayer Multiple", "200-Week Heatmap", "幂律走廊", "Pi Cycle Top"],
         "note": "价格相对长期趋势的拉伸程度（分位数归一化）",
     },
     "链上筹码": {
         "weight": 0.25,
-        "members": ["MVRV-Z", "交易所余额", "长期持有者(CDD)"],
-        "note": "持有者成本与筹码迁移",
+        "members": ["MVRV-Z", "STH成本线", "NUPL", "交易所余额"],
+        "note": "持有者成本、未实现盈亏与筹码迁移",
     },
     "资金流": {
         "weight": 0.20,
@@ -52,8 +52,13 @@ CYCLE_BUCKETS = {
         "members": ["趋势过滤器"],
         "note": "区分'便宜且企稳'与'便宜但还在跌'",
     },
-    "时间周期": {
+    "矿工经济": {
         "weight": 0.10,
+        "members": ["Puell Multiple", "Hash Ribbons"],
+        "note": "结构性卖方的收入周期与投降/恢复信号",
+    },
+    "时间周期": {
+        "weight": 0.05,
         "members": ["减半周期"],
         "note": "减半时钟先验（权重刻意调低）",
     },
@@ -67,8 +72,8 @@ TACTICAL_BUCKETS = {
     },
     "动量结构": {
         "weight": 0.35,
-        "members": ["MACD", "RSI(14)", "布林带"],
-        "note": "多周期动量与超买超卖",
+        "members": ["MACD", "RSI(14)", "SOPR", "布林带"],
+        "note": "多周期动量 + 链上盈亏兑现（SOPR）",
     },
     "市场情绪": {
         "weight": 0.25,
@@ -79,9 +84,10 @@ TACTICAL_BUCKETS = {
 
 # 桶内成员权重（未列出的成员等权）
 MEMBER_WEIGHTS = {
-    "链上筹码": {"MVRV-Z": 0.5, "交易所余额": 0.3, "长期持有者(CDD)": 0.2},
+    "链上筹码": {"MVRV-Z": 0.35, "STH成本线": 0.25, "NUPL": 0.20, "交易所余额": 0.20},
+    "矿工经济": {"Puell Multiple": 0.6, "Hash Ribbons": 0.4},
     "杠杆温度": {"资金费率(7d)": 0.4, "期货基差": 0.4, "多空比": 0.2},
-    "动量结构": {"MACD": 0.4, "RSI(14)": 0.4, "布林带": 0.2},
+    "动量结构": {"MACD": 0.35, "RSI(14)": 0.30, "SOPR": 0.25, "布林带": 0.10},
 }
 
 # 分位数窗口：4 年（一个完整减半周期）

@@ -29,17 +29,8 @@ def calc_mvrv_z() -> IndicatorResult:
     MVRV Z-Score — 市值与已实现市值的偏离度（链上周期估值核心指标）
     历史规律: < 0 周期底部带, > 7 历史顶部带（周期振幅递减, 现代阈值压缩至 ~5）
     """
-    z = None
-    date_str = ""
-    try:
-        r = requests.get("https://bitcoin-data.com/v1/mvrv-zscore/last",
-                         timeout=12, headers=_HEADERS)
-        if r.status_code == 200:
-            obj = r.json()
-            z = float(obj.get("mvrvZscore"))
-            date_str = obj.get("d", "")
-    except Exception as e:
-        print(f"⚠️ MVRV-Z (bitcoin-data.com) 失败: {e}")
+    # 经 _bd_last 走 6h 缓存 (bitcoin-data.com 匿名限 10 次/小时)
+    z = _bd_last("mvrv-zscore", "mvrvZscore")
 
     if z is None:
         return IndicatorResult(
@@ -62,7 +53,7 @@ def calc_mvrv_z() -> IndicatorResult:
 
     return IndicatorResult(
         name="MVRV-Z", value=round(z, 3), score=score, color=color,
-        status=f"{label} (Z={z:.2f})" + (f" | {date_str}" if date_str else ""),
+        status=f"{label} (Z={z:.2f})",
         priority="P0",
         url="https://www.bitcoinmagazinepro.com/charts/mvrv-zscore/",
         description="MVRV Z-Score 是链上周期估值的黄金标准：市值偏离全网持仓成本的标准差数。历史上 <0 为周期底部带，>5（早期 >7）为顶部带。",
@@ -357,3 +348,244 @@ def calc_fear_greed_v2() -> IndicatorResult:
         name="恐惧贪婪指数", value=float('nan'), score=0, color="⚪",
         status="API 暂不可用", priority="P1",
         url="https://alternative.me/crypto/fear-and-greed-index/")
+
+
+# ============================================================
+# 链上慢变量 TTL 缓存
+# bitcoin-data.com 免费档有速率限制, 且链上指标皆为日更 —
+# 不应跟随 5 分钟仪表盘刷新重复请求, 统一缓存 6 小时
+# ============================================================
+
+import threading as _threading
+import time as _time
+
+_ONCHAIN_TTL = 6 * 3600
+_ONCHAIN_FAIL_TTL = 1800   # 失败负缓存 30 分钟, 避免限流期间连续轰炸 (bitcoin-data.com 匿名限 10 次/小时)
+_onchain_cache: dict = {}
+_onchain_lock = _threading.Lock()
+
+
+def _cached_onchain(key: str, fetch_fn):
+    """6 小时 TTL 的进程内缓存; 失败负缓存 30 分钟; 有旧值时失败回退旧值（哪怕已过期）"""
+    now = _time.time()
+    with _onchain_lock:
+        hit = _onchain_cache.get(key)
+        if hit:
+            age = now - hit[0]
+            if hit[1] is not None and age < _ONCHAIN_TTL:
+                return hit[1]
+            if hit[1] is None and age < _ONCHAIN_FAIL_TTL:
+                return None
+    try:
+        val = fetch_fn()
+    except Exception as e:
+        print(f"⚠️ onchain [{key}] 获取失败: {e}")
+        val = None
+    with _onchain_lock:
+        if val is not None:
+            _onchain_cache[key] = (now, val)
+            return val
+        hit = _onchain_cache.get(key)
+        if hit and hit[1] is not None:
+            return hit[1]  # 保留旧值, 不覆盖
+        _onchain_cache[key] = (now, None)  # 负缓存
+        return None
+
+
+def _bd_last(endpoint: str, field: str):
+    """bitcoin-data.com /v1/<endpoint>/last → float(field)"""
+    def _fetch():
+        r = requests.get(f"https://bitcoin-data.com/v1/{endpoint}/last",
+                         timeout=12, headers=_HEADERS)
+        if r.status_code != 200:
+            return None
+        return float(r.json().get(field))
+    return _cached_onchain(endpoint, _fetch)
+
+
+# ============================================================
+# 第一梯队链上指标 (2026-06 调研后纳入)
+# ============================================================
+
+def calc_sth_realized_price(current_price: float) -> IndicatorResult:
+    """
+    STH 成本线 — 短期持有者已实现价格 (155 天内移动过的币的平均成本)
+    公认的牛熊分界中线; 价格/STH成本 即 STH-MVRV:
+    < 0.8 历史投降带, > 1.35 STH 深度获利(过热)
+    """
+    sth_rp = _bd_last("sth-realized-price", "sthRealizedPrice")
+    if sth_rp is None or not current_price or sth_rp <= 0:
+        return IndicatorResult(
+            name="STH成本线", value=float('nan'), score=0, color="⚪",
+            status="数据源暂不可用", priority="P0",
+            url="https://charts.bitbo.io/sth-realized-price/",
+            description="短期持有者平均持仓成本，牛熊分界中线。", method="数据源暂不可用。")
+
+    ratio = current_price / sth_rp
+    if ratio < 0.80:
+        score, color, label = 1, "🟢", "深度超卖 — 历史投降带"
+    elif ratio < 0.95:
+        score, color, label = 0.5, "🟢", "压在 STH 成本下方 — 抛压衰竭区"
+    elif ratio < 1.15:
+        score, color, label = 0, "🟡", "成本线争夺区"
+    elif ratio < 1.35:
+        score, color, label = -0.5, "🟠", "STH 获利偏厚 — 回调风险"
+    else:
+        score, color, label = -1, "🔴", "STH 深度获利 — 周期过热"
+
+    return IndicatorResult(
+        name="STH成本线", value=round(ratio, 3), score=score, color=color,
+        status=f"{label} (价格/成本 {ratio:.2f}x | 成本 ${sth_rp:,.0f})",
+        priority="P0",
+        url="https://charts.bitbo.io/sth-realized-price/",
+        description="短期持有者(155天内活跃筹码)的平均成本线。价格在其上方 = 短线筹码获利的牛市格局，下方 = 熊市格局；极端偏离则反向（超卖/过热）。",
+        method="STH-MVRV = 现价 / STH已实现价格。<0.8 投降带 +1，>1.35 过热 -1。数据源: bitcoin-data.com，6h 缓存。")
+
+
+def calc_nupl() -> IndicatorResult:
+    """
+    NUPL — 全网未实现盈亏占市值比例
+    经典周期分区: <0 投降, 0~0.25 希望/恐惧, 0.25~0.5 乐观, 0.5~0.75 信仰, >0.75 兴奋
+    """
+    nupl = _bd_last("nupl", "nupl")
+    if nupl is None:
+        return IndicatorResult(
+            name="NUPL", value=float('nan'), score=0, color="⚪",
+            status="数据源暂不可用", priority="P0",
+            url="https://charts.bgeometrics.com/nupl.html",
+            description="全网未实现盈亏 / 市值，周期情绪分区。", method="数据源暂不可用。")
+
+    if nupl < 0:
+        score, color, label = 1, "🟢", "投降区 — 全网浮亏"
+    elif nupl < 0.25:
+        score, color, label = 0.5, "🟢", "希望/恐惧区"
+    elif nupl < 0.5:
+        score, color, label = 0, "🟡", "乐观区"
+    elif nupl < 0.75:
+        score, color, label = -0.5, "🟠", "信仰/贪婪区"
+    else:
+        score, color, label = -1, "🔴", "兴奋区 — 周期顶部带"
+
+    return IndicatorResult(
+        name="NUPL", value=round(nupl, 4), score=score, color=color,
+        status=f"{label} ({nupl:.3f})", priority="P0",
+        url="https://charts.bgeometrics.com/nupl.html",
+        description="Net Unrealized Profit/Loss：全网持仓的未实现盈亏占市值比例，比 MVRV-Z 更直观的周期情绪分区。历史大底都出现在 <0 的投降区，大顶在 >0.75 的兴奋区。",
+        method="NUPL = (市值 - 已实现市值) / 市值。数据源: bitcoin-data.com，6h 缓存。")
+
+
+def calc_sopr() -> IndicatorResult:
+    """
+    SOPR — 已花费产出利润率 (当日链上卖出筹码的平均盈亏率)
+    < 1 亏损抛售(投降), > 1 获利了结; 战术级短窗口信号
+    """
+    sopr = _bd_last("sopr", "sopr")
+    if sopr is None:
+        return IndicatorResult(
+            name="SOPR", value=float('nan'), score=0, color="⚪",
+            status="数据源暂不可用", priority="P1",
+            url="https://charts.bgeometrics.com/sopr.html",
+            description="链上卖出筹码的平均盈亏率。", method="数据源暂不可用。")
+
+    if sopr < 0.97:
+        score, color, label = 1, "🟢", "重度亏损抛售 — 投降信号"
+    elif sopr < 0.995:
+        score, color, label = 0.5, "🟢", "亏损抛售中"
+    elif sopr < 1.02:
+        score, color, label = 0, "🟡", "盈亏平衡附近"
+    elif sopr < 1.05:
+        score, color, label = -0.5, "🟠", "获利了结升温"
+    else:
+        score, color, label = -1, "🔴", "大额获利兑现"
+
+    return IndicatorResult(
+        name="SOPR", value=round(sopr, 4), score=score, color=color,
+        status=f"{label} ({sopr:.4f})", priority="P1",
+        url="https://charts.bgeometrics.com/sopr.html",
+        description="Spent Output Profit Ratio：当日链上移动筹码的卖出价/成本价。持续 <1 = 割肉投降（逆向看多），>1.05 = 获利兑现压力。链上版的短线情绪计。",
+        method="SOPR = 已花费 UTXO 的卖出价值/创建价值。<0.97 投降 +1，>1.05 兑现 -1。数据源: bitcoin-data.com，6h 缓存。")
+
+
+def calc_puell_multiple() -> IndicatorResult:
+    """
+    Puell Multiple — 矿工日收入 / 其 365 日均值
+    矿工经济学周期指标: <0.5 历史底部带(关机价附近), >4 顶部带
+    """
+    puell = _bd_last("puell-multiple", "puellMultiple")
+    if puell is None:
+        return IndicatorResult(
+            name="Puell Multiple", value=float('nan'), score=0, color="⚪",
+            status="数据源暂不可用", priority="P0",
+            url="https://charts.bgeometrics.com/puell_multiple.html",
+            description="矿工收入相对一年均值的倍数。", method="数据源暂不可用。")
+
+    if puell < 0.5:
+        score, color, label = 1, "🟢", "矿工收入极度压缩 — 历史底部带"
+    elif puell < 0.8:
+        score, color, label = 0.5, "🟢", "矿工承压区"
+    elif puell < 2.0:
+        score, color, label = 0, "🟡", "正常区间"
+    elif puell < 4.0:
+        score, color, label = -0.5, "🟠", "矿工收入偏高"
+    else:
+        score, color, label = -1, "🔴", "矿工暴利 — 周期顶部带"
+
+    return IndicatorResult(
+        name="Puell Multiple", value=round(puell, 3), score=score, color=color,
+        status=f"{label} ({puell:.2f})", priority="P0",
+        url="https://charts.bgeometrics.com/puell_multiple.html",
+        description="矿工日收入(USD)相对其 365 日均值的倍数。矿工是结构性卖方，其收入周期与价格周期强相关：收入极度压缩时矿工投降出清（底部），暴利时派发（顶部）。覆盖'关机币价'视角。",
+        method="Puell = 日发行价值 / 365日MA。<0.5 底部带 +1，>4 顶部带 -1。数据源: bitcoin-data.com，6h 缓存。")
+
+
+def calc_hash_ribbons() -> IndicatorResult:
+    """
+    Hash Ribbons — 算力 30/60 日均线交叉
+    矿工投降(30下穿60)后的恢复上穿是历史胜率极高的买点信号
+    """
+    def _fetch():
+        r = requests.get("https://mempool.space/api/v1/mining/hashrate/3m",
+                         timeout=12, headers=_HEADERS)
+        if r.status_code != 200:
+            return None
+        arr = (r.json() or {}).get("hashrates", [])
+        if len(arr) < 60:
+            return None
+        return [float(x["avgHashrate"]) for x in arr]
+
+    rates = _cached_onchain("hashrate-3m", _fetch)
+    if not rates:
+        return IndicatorResult(
+            name="Hash Ribbons", value=float('nan'), score=0, color="⚪",
+            status="数据源暂不可用", priority="P1",
+            url="https://charts.bitbo.io/hash-ribbons/",
+            description="算力 30/60 日均线交叉信号。", method="数据源暂不可用。")
+
+    s = pd.Series(rates)
+    sma30 = s.rolling(30).mean()
+    sma60 = s.rolling(60).mean()
+    above = (sma30 > sma60).fillna(False)
+
+    cur_above = bool(above.iloc[-1])
+    # 距最近一次状态翻转的天数
+    flip_days = None
+    for i in range(len(above) - 2, -1, -1):
+        if bool(above.iloc[i]) != cur_above:
+            flip_days = len(above) - 1 - i
+            break
+
+    spread_pct = (sma30.iloc[-1] / sma60.iloc[-1] - 1) * 100
+
+    if cur_above and flip_days is not None and flip_days <= 45:
+        score, color, label = 1, "🟢", f"矿工投降结束 — 恢复上穿 {flip_days} 天 (经典买点)"
+    elif cur_above:
+        score, color, label = 0.25, "🟢", "算力扩张期"
+    else:
+        score, color, label = -0.25, "🟠", "矿工投降中 (等待恢复上穿)"
+
+    return IndicatorResult(
+        name="Hash Ribbons", value=round(spread_pct, 2), score=score, color=color,
+        status=f"{label} | 30D/60D 差 {spread_pct:+.1f}%", priority="P1",
+        url="https://charts.bitbo.io/hash-ribbons/",
+        description="算力 30 日均线 vs 60 日均线：下穿 = 矿工投降（出清弱矿工），重新上穿 = 投降结束，历史上是胜率极高的买点确认信号。本质是买点指标，无对称卖出信号。",
+        method="mempool.space 90 天日度算力，SMA30 上穿 SMA60 且 45 天内 → +1；维持上方 +0.25；下方(投降中) -0.25。6h 缓存。")

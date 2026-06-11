@@ -35,6 +35,8 @@ from .indicators_v2 import (
     calc_mvrv_z, calc_stablecoin_growth, calc_futures_basis,
     calc_trend_filter, calc_funding_rate_7d, calc_etf_net_flow,
     calc_fear_greed_v2,
+    calc_sth_realized_price, calc_nupl, calc_sopr,
+    calc_puell_multiple, calc_hash_ribbons,
 )
 from .scoring import compute_dual_scores
 # 历史数据函数（sparkline 用，部分指标无法从 df 推导，回退至 API）
@@ -372,6 +374,12 @@ def run_dashboard() -> DashboardResult:
         "资金费率(7d)": calc_funding_rate_7d,
         "ETF净流入": calc_etf_net_flow,
         "恐惧贪婪指数": calc_fear_greed_v2,
+        # 第一梯队链上指标（2026-06 外部看板调研后纳入, 6h 缓存）
+        "STH成本线": lambda: calc_sth_realized_price(current_price),
+        "NUPL": calc_nupl,
+        "SOPR": calc_sopr,
+        "Puell Multiple": calc_puell_multiple,
+        "Hash Ribbons": calc_hash_ribbons,
         # 原有指标
         "多空比": calc_long_short_ratio,
         "最大痛点": calc_max_pain,
