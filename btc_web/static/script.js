@@ -424,7 +424,7 @@ function renderDashboard(data) {
     }
 
     // 更新顶部摘要栏
-    updateTopSummaryBar(data.btc_price, data.indicators);
+    updateTopSummaryBar(data);
 
     // 更新周期分仪表（total_score 即周期分）
     updateGauge(data.total_score);
@@ -481,7 +481,9 @@ function renderDatMNAV(ind) {
 /**
  * 更新顶部摘要栏
  */
-function updateTopSummaryBar(btcPrice, indicators) {
+function updateTopSummaryBar(data) {
+    const btcPrice = data.btc_price;
+    const indicators = data.indicators || {};
     // 价格
     const priceEl = document.getElementById('summaryPrice');
     if (priceEl) {
@@ -536,28 +538,17 @@ function updateTopSummaryBar(btcPrice, indicators) {
         }
     }
 
-    // 减半倒计时
-    const halvingEl = document.getElementById('summaryHalving');
-    if (halvingEl && indicators['减半周期']) {
-        const status = indicators['减半周期'].status;
-        const match = status.match(/(\d+)\s*天/);
-        if (match) {
-            halvingEl.textContent = match[1] + '天';
-        } else {
-            halvingEl.textContent = Math.round(indicators['减半周期'].value) + '月';
-        }
+    // 周期仓位分 / 短期战术分
+    const scoreColor = (s) => s >= 0.146 ? '#00ff88' : s <= -0.146 ? '#ff4466' : '#ffcc00';
+    const cycleEl = document.getElementById('summaryCycle');
+    if (cycleEl && typeof data.total_score === 'number') {
+        cycleEl.textContent = (data.total_score > 0 ? '+' : '') + data.total_score.toFixed(2);
+        cycleEl.style.color = scoreColor(data.total_score);
     }
-
-    // 均衡价格
-    const balancedEl = document.getElementById('summaryBalanced');
-    if (balancedEl && indicators['均衡价格']) {
-        const val = indicators['均衡价格'].value;
-        if (!isNaN(val)) {
-            balancedEl.textContent = '$' + val.toLocaleString(undefined, {
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 0
-            });
-        }
+    const tacticalEl = document.getElementById('summaryTactical');
+    if (tacticalEl && typeof data.tactical_score === 'number') {
+        tacticalEl.textContent = (data.tactical_score > 0 ? '+' : '') + data.tactical_score.toFixed(2);
+        tacticalEl.style.color = scoreColor(data.tactical_score);
     }
 }
 

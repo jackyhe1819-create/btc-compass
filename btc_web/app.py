@@ -90,6 +90,7 @@ from btc_dashboard.derivatives import fetch_derivatives_panel
 from btc_dashboard.etf_flow import fetch_etf_flow_history
 
 app = Flask(__name__)
+app.json.sort_keys = False  # 保持后端字典插入序 (指标卡片按 runner._CARD_ORDER 语义排序)
 
 # ── BTC 价格/指标缓存（5 分钟）──────────────────────────────────────
 _btc_data_cache = None

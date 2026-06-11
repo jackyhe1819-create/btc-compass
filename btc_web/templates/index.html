@@ -16,7 +16,7 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>₿</text></svg>">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-2">
     <!-- 防止主题闪烁：在 CSS 加载前立即恢复主题（v2: 默认米白色） -->
     <script>
         (function() {
@@ -67,12 +67,12 @@
                     <span class="value" id="summaryFearGreed">--</span>
                 </div>
                 <div class="summary-item">
-                    <span class="label">减半倒计时</span>
-                    <span class="value" id="summaryHalving">--</span>
+                    <span class="label">🧭 周期仓位分</span>
+                    <span class="value" id="summaryCycle">--</span>
                 </div>
                 <div class="summary-item">
-                    <span class="label">均衡价格</span>
-                    <span class="value" id="summaryBalanced">--</span>
+                    <span class="label">⚡ 短期战术分</span>
+                    <span class="value" id="summaryTactical">--</span>
                 </div>
             </section>
 
@@ -114,6 +114,7 @@
                 <div class="score-summary-container">
                     <!-- Left: Dual Gauges (BTC Compass) -->
                     <div class="gauge-container">
+                        <div class="dual-gauges">
                         <div class="dual-gauge-block">
                             <h2 class="gauge-title">🧭 周期仓位分 <span class="gauge-subtitle">该配多少仓位</span></h2>
                             <div class="gauge">
@@ -131,7 +132,7 @@
                             <div class="bucket-bars" id="cycleBuckets"></div>
                         </div>
 
-                        <div class="dual-gauge-block" style="margin-top: 22px;">
+                        <div class="dual-gauge-block">
                             <h2 class="gauge-title">⚡ 短期战术分 <span class="gauge-subtitle">现在是不是好时点</span></h2>
                             <div class="gauge">
                                 <div class="gauge-bg"></div>
@@ -147,6 +148,7 @@
                             <div class="recommendation yellow" id="tacticalRecommendation">加载中...</div>
                             <div class="bucket-bars" id="tacticalBuckets"></div>
                         </div>
+                        </div><!-- /dual-gauges -->
 
                         <details class="score-explain">
                             <summary class="score-explain-toggle">📖 双评分说明（与原版的区别）</summary>
@@ -839,7 +841,7 @@
         <p style="margin: 6px 0 0 0; font-size: 0.75rem; color: #666;">点击地址即可复制</p>
     </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}?v=compass-1"></script>
+    <script src="{{ url_for('static', filename='script.js') }}?v=compass-2"></script>
 </body>
 
 </html>

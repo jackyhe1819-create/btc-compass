@@ -22,7 +22,7 @@ from .core import (
 )
 from .indicators_long import (
     calc_two_year_ma_multiplier, calc_200w_ma_heatmap, calc_golden_ratio_multiplier,
-    calc_pi_cycle, calc_lth_supply, calc_hashrate, calc_balanced_price,
+    calc_pi_cycle, calc_hashrate, calc_balanced_price,
     calc_halving_cycle, calc_ahr999, calc_power_law, calc_mayer_multiple,
 )
 from .indicators_short import calc_rsi, calc_macd, calc_bollinger_bands
@@ -380,7 +380,7 @@ def run_dashboard() -> DashboardResult:
         "SOPR": calc_sopr,
         "Puell Multiple": calc_puell_multiple,
         "Hash Ribbons": calc_hash_ribbons,
-        # 原有指标
+        # 原有指标 (LTH量比代理已退役: 既不计分也不展示)
         "多空比": calc_long_short_ratio,
         "最大痛点": calc_max_pain,
         "BTC市占率": calc_btc_dominance,
@@ -388,7 +388,6 @@ def run_dashboard() -> DashboardResult:
         "公司持仓": calc_company_holdings,
         "交易所余额": calc_exchange_reserve,
         "全网算力": calc_hashrate,
-        "长期持有者(CDD)": calc_lth_supply,
     }
 
     with ThreadPoolExecutor(max_workers=6) as executor:
@@ -404,6 +403,31 @@ def run_dashboard() -> DashboardResult:
                     color="gray", status="数据获取失败",
                     priority="辅助", url="", description="", method=""
                 )
+
+    # 优先级归一化: 短期类指标统一为 P1（前端分类 tab 按 P0/P1/P2 过滤）
+    for ind in indicators.values():
+        if ind.priority == "短期":
+            ind.priority = "P1"
+
+    # 固定卡片顺序（api_tasks 用 as_completed 收集, 完成顺序随机,
+    # 不重排会导致每次刷新指标卡片乱序跳动）
+    _CARD_ORDER = [
+        # 周期估值
+        "MVRV-Z", "STH成本线", "NUPL", "Mayer Multiple", "200-Week Heatmap",
+        "幂律走廊", "Ahr999", "2-Year MA Mult", "Golden Ratio", "均衡价格",
+        "Pi Cycle Top", "减半周期",
+        # 趋势与动量
+        "趋势过滤器", "MACD", "RSI(14)", "布林带", "SOPR",
+        # 资金流与筹码
+        "ETF净流入", "稳定币增速", "交易所余额", "BTC市占率", "公司持仓", "MSTR mNAV",
+        # 衍生品与情绪
+        "资金费率(7d)", "期货基差", "多空比", "最大痛点", "恐惧贪婪指数",
+        # 矿工与网络
+        "Puell Multiple", "Hash Ribbons", "全网算力",
+    ]
+    ordered = {n: indicators[n] for n in _CARD_ORDER if n in indicators}
+    ordered.update({n: i for n, i in indicators.items() if n not in ordered})
+    indicators = ordered
 
     # 计算双评分（周期分 + 战术分, 含分位数归一化与因子桶明细）
     scores = compute_dual_scores(indicators, df)
