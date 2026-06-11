@@ -48,3 +48,4 @@ archive/
 # Ad-hoc 调试脚本与 superpowers 相关
 btc_web/test_*.py
 docs/superpowers/
+compass_server.log

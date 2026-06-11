@@ -753,7 +753,7 @@ def get_indicator_history(indicator_name: str, df: pd.DataFrame = None, days: in
         return get_ahr999_history(df, days)
     elif indicator_name == "恐惧贪婪指数":
         return get_fear_greed_history(days)
-    elif indicator_name == "资金费率":
+    elif indicator_name in ("资金费率", "资金费率(7d)"):
         return get_funding_rate_history_okx(days)
     elif indicator_name == "多空比":
         return get_long_short_history(days)
@@ -785,7 +785,7 @@ def get_indicator_history(indicator_name: str, df: pd.DataFrame = None, days: in
         return get_dominance_history(days)
     elif indicator_name == "MSTR mNAV" and df is not None:
         return get_mnav_history(df, days)
-    elif indicator_name in ("ETF活跃度", "ETF资金流"):
+    elif indicator_name in ("ETF活跃度", "ETF资金流", "ETF净流入"):
         return get_etf_history(days)
     elif indicator_name.startswith("最大痛点") and df is not None:
         return get_max_pain_history(df, days)

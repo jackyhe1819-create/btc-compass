@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BTC 长期指标仪表盘</title>
+    <title>BTC Compass · 周期与时机仪表盘</title>
     <meta name="description" content="实时监控比特币长期指标，包括 Pi Cycle Top、减半周期、Ahr999、幂律走廊等核心指标">
 
     <!-- Google Fonts -->
@@ -16,7 +16,7 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>₿</text></svg>">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=22-panels">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-1">
     <!-- 防止主题闪烁：在 CSS 加载前立即恢复主题（v2: 默认米白色） -->
     <script>
         (function() {
@@ -40,7 +40,7 @@
     <div class="container">
         <!-- Header -->
         <header class="header">
-            <h1>₿ BTC 长期指标仪表盘</h1>
+            <h1>🧭 BTC Compass · 周期与时机</h1>
             <p class="subtitle">基于 P0/P1 核心指标的市场监控系统</p>
             <p class="timestamp" id="timestamp">加载中...</p>
         </header>
@@ -112,79 +112,107 @@
             <!-- Score Gauge + Summary Table -->
             <section class="gauge-section">
                 <div class="score-summary-container">
-                    <!-- Left: Gauge -->
+                    <!-- Left: Dual Gauges (BTC Compass) -->
                     <div class="gauge-container">
-                        <h2 class="gauge-title">综合评分</h2>
-                        <div class="gauge">
-                            <div class="gauge-bg"></div>
-                            <div class="gauge-needle" id="gaugeNeedle"></div>
-                            <div class="gauge-center"></div>
+                        <div class="dual-gauge-block">
+                            <h2 class="gauge-title">🧭 周期仓位分 <span class="gauge-subtitle">该配多少仓位</span></h2>
+                            <div class="gauge">
+                                <div class="gauge-bg"></div>
+                                <div class="gauge-needle" id="gaugeNeedle"></div>
+                                <div class="gauge-center"></div>
+                            </div>
+                            <div class="gauge-labels">
+                                <span>-1 (防守)</span>
+                                <span>0</span>
+                                <span>+1 (重仓)</span>
+                            </div>
+                            <div class="score-value" id="scoreValue">--</div>
+                            <div class="recommendation yellow" id="recommendation">加载中...</div>
+                            <div class="bucket-bars" id="cycleBuckets"></div>
                         </div>
-                        <div class="gauge-labels">
-                            <span>-1 (卖出)</span>
-                            <span>0</span>
-                            <span>+1 (买入)</span>
+
+                        <div class="dual-gauge-block" style="margin-top: 22px;">
+                            <h2 class="gauge-title">⚡ 短期战术分 <span class="gauge-subtitle">现在是不是好时点</span></h2>
+                            <div class="gauge">
+                                <div class="gauge-bg"></div>
+                                <div class="gauge-needle" id="gaugeNeedleTactical"></div>
+                                <div class="gauge-center"></div>
+                            </div>
+                            <div class="gauge-labels">
+                                <span>-1 (高危)</span>
+                                <span>0</span>
+                                <span>+1 (窗口)</span>
+                            </div>
+                            <div class="score-value" id="tacticalScoreValue">--</div>
+                            <div class="recommendation yellow" id="tacticalRecommendation">加载中...</div>
+                            <div class="bucket-bars" id="tacticalBuckets"></div>
                         </div>
-                        <div class="score-value" id="scoreValue">--</div>
-                        <div class="recommendation yellow" id="recommendation">加载中...</div>
 
                         <details class="score-explain">
-                            <summary class="score-explain-toggle">📖 评分说明</summary>
+                            <summary class="score-explain-toggle">📖 双评分说明（与原版的区别）</summary>
                             <div class="score-explain-content">
                                 <div class="explain-section">
-                                    <h4>计算方式</h4>
-                                    <p>综合评分 = Σ(指标得分 × 权重) / Σ权重</p>
-                                    <p>每个指标得分范围 <b>-1</b>(极度看空) ~ <b>+1</b>(极度看多)</p>
+                                    <h4>为什么是两个分数</h4>
+                                    <p><b>周期分</b>回答"该配多少仓位"（以周为单位变化），<b>战术分</b>回答"现在是不是好的操作时点"（以天为单位变化）。原版把两者混在一个分数里，短期信号被 92% 的长期权重淹没。</p>
                                 </div>
                                 <div class="explain-section">
-                                    <h4>区间划分 <span style="font-size: 0.75rem; color: #888; font-weight: normal;">（斐波那契黄金分割阈值）</span></h4>
+                                    <h4>周期分因子桶</h4>
+                                    <div class="weight-group">
+                                        <span class="weight-label">趋势伸展 30%</span>
+                                        <span class="weight-detail">Mayer · 200W · 幂律 · Pi Cycle（滚动4年分位数归一化，自适应周期振幅衰减）</span>
+                                    </div>
+                                    <div class="weight-group">
+                                        <span class="weight-label">链上筹码 25%</span>
+                                        <span class="weight-detail">MVRV-Z 50% · 交易所余额 30% · LTH 20%</span>
+                                    </div>
+                                    <div class="weight-group">
+                                        <span class="weight-label">资金流 20%</span>
+                                        <span class="weight-detail">ETF 真实净流入 · 稳定币 30 日增速（对称打分）</span>
+                                    </div>
+                                    <div class="weight-group">
+                                        <span class="weight-label">趋势确认 15%</span>
+                                        <span class="weight-detail">20W EMA + 200DMA 斜率（区分"便宜且企稳"与"接飞刀"）</span>
+                                    </div>
+                                    <div class="weight-group">
+                                        <span class="weight-label">时间周期 10%</span>
+                                        <span class="weight-detail">减半时钟</span>
+                                    </div>
+                                </div>
+                                <div class="explain-section">
+                                    <h4>战术分因子桶</h4>
+                                    <div class="weight-group">
+                                        <span class="weight-label">杠杆温度 40%</span>
+                                        <span class="weight-detail">资金费率7日均 · 期货年化基差 · 多空比（逆向）</span>
+                                    </div>
+                                    <div class="weight-group">
+                                        <span class="weight-label">动量结构 35%</span>
+                                        <span class="weight-detail">多周期 MACD · RSI · 布林带</span>
+                                    </div>
+                                    <div class="weight-group">
+                                        <span class="weight-label">市场情绪 25%</span>
+                                        <span class="weight-detail">恐惧贪婪（仅 ≤30 / ≥70 极值计分）</span>
+                                    </div>
+                                </div>
+                                <div class="explain-section">
+                                    <h4>仓位档位（周期分 · 斐波那契阈值）</h4>
                                     <table class="explain-table">
-                                        <tr>
-                                            <td class="range-cell green">≥ 0.618</td>
-                                            <td>强烈买入</td>
-                                        </tr>
-                                        <tr>
-                                            <td class="range-cell green">0.382 ~ 0.618</td>
-                                            <td>买入</td>
-                                        </tr>
-                                        <tr>
-                                            <td class="range-cell green-light">0.146 ~ 0.382</td>
-                                            <td>增持</td>
-                                        </tr>
-                                        <tr>
-                                            <td class="range-cell yellow">-0.146 ~ 0.146</td>
-                                            <td>持有/观望</td>
-                                        </tr>
-                                        <tr>
-                                            <td class="range-cell orange">-0.382 ~ -0.146</td>
-                                            <td>减仓</td>
-                                        </tr>
-                                        <tr>
-                                            <td class="range-cell red">-0.618 ~ -0.382</td>
-                                            <td>卖出</td>
-                                        </tr>
-                                        <tr>
-                                            <td class="range-cell red">≤ -0.618</td>
-                                            <td>清仓</td>
-                                        </tr>
+                                        <tr><td class="range-cell green">≥ 0.618</td><td>重仓区 80-100%</td></tr>
+                                        <tr><td class="range-cell green">0.382 ~ 0.618</td><td>偏多配置 60-80%</td></tr>
+                                        <tr><td class="range-cell green-light">0.146 ~ 0.382</td><td>标准配置 40-60%</td></tr>
+                                        <tr><td class="range-cell yellow">-0.146 ~ 0.146</td><td>中性观望 30-50%</td></tr>
+                                        <tr><td class="range-cell orange">-0.382 ~ -0.146</td><td>减配 15-30%</td></tr>
+                                        <tr><td class="range-cell red">-0.618 ~ -0.382</td><td>低配 5-15%</td></tr>
+                                        <tr><td class="range-cell red">≤ -0.618</td><td>防守区 0-5%</td></tr>
                                     </table>
                                 </div>
                                 <div class="explain-section">
-                                    <h4>权重分配 <span style="font-size: 0.75rem; color: #888; font-weight: normal;">（长周期偏置 · 大周期长期决策）</span></h4>
-                                    <div class="weight-group">
-                                        <span class="weight-label">长期周期 (65%)</span>
-                                        <span class="weight-detail">Pi Cycle 10% · 200W 10% · Mayer 9% · 2Y-MA 8% · Ahr999 8%
-                                            · 幂律 8% · 黄金比 7% · 减半 5%</span>
-                                    </div>
-                                    <div class="weight-group">
-                                        <span class="weight-label">结构/链上 (27%)</span>
-                                        <span class="weight-detail">CDD 10% · 均衡价格 5% · 交易所余额 4% · ETF 3% · 市占率 2%
-                                            · 算力 2% · MSTR mNAV 1%</span>
-                                    </div>
-                                    <div class="weight-group">
-                                        <span class="weight-label">短期 (8%)</span>
-                                        <span class="weight-detail">恐贪 5% · RSI 2% · MACD 1% <span style="color:#666;">（布林带/资金费率/多空比/最大痛点 仅展示，不计入）</span></span>
-                                    </div>
+                                    <h4>关键修正（vs 原版）</h4>
+                                    <p style="font-size:0.78rem; line-height:1.6;">
+                                        ① ETF 用真实净流入替代成交量（原版永不给负分）<br>
+                                        ② 失败指标剔除权重（原版按 0 分中性票计入）<br>
+                                        ③ 估值类指标分位数归一化（原版绝对阈值在振幅衰减后顶部打不出 -1）<br>
+                                        ④ 新增 MVRV-Z / 稳定币增速 / 期货基差 / 趋势过滤器 四个正交因子
+                                    </p>
                                 </div>
                             </div>
                         </details>
@@ -807,7 +835,7 @@
         <p style="margin: 6px 0 0 0; font-size: 0.75rem; color: #666;">点击地址即可复制</p>
     </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}?v=22-dat"></script>
+    <script src="{{ url_for('static', filename='script.js') }}?v=compass-1"></script>
 </body>
 
 </html>

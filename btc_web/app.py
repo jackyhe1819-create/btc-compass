@@ -153,6 +153,10 @@ def _do_refresh_dashboard():
             "btc_price": float(result.btc_price),
             "total_score": float(result.total_score),
             "recommendation": result.recommendation,
+            "tactical_score": float(result.tactical_score),
+            "tactical_recommendation": result.tactical_recommendation,
+            "cycle_buckets": result.cycle_buckets,
+            "tactical_buckets": result.tactical_buckets,
             "indicators": indicators_json,
             "sparklines": sparklines
         }
@@ -378,7 +382,7 @@ def api_version():
     """部署版本检查"""
     import sys
     return jsonify({
-        "version": "2026-04-12-v2",
+        "version": "compass-v1",
         "server_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC'),
         "python": sys.version,
         "dashboard_ready": _dashboard_cache is not None,

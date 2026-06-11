@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: btc-dashboard
+    name: btc-compass
     runtime: python
     rootDir: .
     buildCommand: pip install -r btc_web/requirements.txt

@@ -2797,3 +2797,72 @@ body::before {
     overflow: hidden;
     white-space: nowrap;
 }
+
+/* ============ BTC Compass: 双仪表 + 因子桶 ============ */
+.dual-gauge-block {
+    padding-bottom: 6px;
+}
+.dual-gauge-block .gauge-title {
+    font-size: 1.05rem;
+    margin-bottom: 12px;
+}
+.gauge-subtitle {
+    font-size: 0.7rem;
+    color: var(--text-muted, #888);
+    font-weight: normal;
+    margin-left: 6px;
+}
+.bucket-bars {
+    margin: 12px auto 0;
+    max-width: 320px;
+    text-align: left;
+}
+.bucket-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+}
+.bucket-name {
+    flex: 0 0 96px;
+    font-size: 0.72rem;
+    color: var(--text-secondary, #aaa);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.bucket-name em {
+    font-style: normal;
+    color: var(--text-muted, #666);
+    font-size: 0.62rem;
+}
+.bucket-track {
+    flex: 1;
+    position: relative;
+    height: 7px;
+    background: rgba(128, 128, 128, 0.15);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.bucket-mid {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: rgba(128, 128, 128, 0.45);
+}
+.bucket-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: 4px;
+    transition: width 0.6s ease, left 0.6s ease;
+}
+.bucket-score {
+    flex: 0 0 44px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}

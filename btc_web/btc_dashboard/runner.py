@@ -31,6 +31,12 @@ from .indicators_aux import (
     calc_btc_dominance, calc_etf_flow, calc_mnav, calc_company_holdings,
     calc_exchange_reserve, calc_max_pain,
 )
+from .indicators_v2 import (
+    calc_mvrv_z, calc_stablecoin_growth, calc_futures_basis,
+    calc_trend_filter, calc_funding_rate_7d, calc_etf_net_flow,
+    calc_fear_greed_v2,
+)
+from .scoring import compute_dual_scores
 # 历史数据函数（sparkline 用，部分指标无法从 df 推导，回退至 API）
 from .history import (
     get_fear_greed_history, get_funding_rate_history_okx,
@@ -270,9 +276,15 @@ def get_sparklines(df: pd.DataFrame, indicators: dict, days: int = 7) -> dict:
                 h = get_fear_greed_history(days)
                 sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
 
-            elif name == "资金费率":
+            elif name in ("资金费率", "资金费率(7d)"):
                 h = get_funding_rate_history_okx(days)
                 sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name == "趋势过滤器":
+                # 价格相对 20周 EMA 的偏离百分比
+                ema140 = df['price'].ewm(span=140, adjust=False).mean()
+                dev = ((recent['price'] - ema140.loc[idx]) / ema140.loc[idx] * 100)
+                sparklines[name] = _clean(dev, idx, 2)
 
             elif name == "多空比":
                 h = get_long_short_history(days)
@@ -286,7 +298,7 @@ def get_sparklines(df: pd.DataFrame, indicators: dict, days: int = 7) -> dict:
                 h = get_mnav_history(days=days)
                 sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
 
-            elif name in ("ETF活跃度", "ETF资金流"):
+            elif name in ("ETF活跃度", "ETF资金流", "ETF净流入"):
                 h = get_etf_history(days=days)
                 sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
 
@@ -349,15 +361,21 @@ def run_dashboard() -> DashboardResult:
     indicators["MACD"] = calc_macd(df)
     indicators["布林带"] = calc_bollinger_bands(df)
     indicators["均衡价格"] = calc_balanced_price(df)
+    indicators["趋势过滤器"] = calc_trend_filter(df)
 
     # === 第二步：并发执行网络 API 调用（IO密集，并行加速） ===
     api_tasks = {
-        "恐惧贪婪指数": calc_fear_greed_index,
-        "资金费率": calc_funding_rate,
+        # v2 指标（BTC Compass 新增/替换）
+        "MVRV-Z": calc_mvrv_z,
+        "稳定币增速": calc_stablecoin_growth,
+        "期货基差": calc_futures_basis,
+        "资金费率(7d)": calc_funding_rate_7d,
+        "ETF净流入": calc_etf_net_flow,
+        "恐惧贪婪指数": calc_fear_greed_v2,
+        # 原有指标
         "多空比": calc_long_short_ratio,
         "最大痛点": calc_max_pain,
         "BTC市占率": calc_btc_dominance,
-        "ETF资金流": calc_etf_flow,
         "MSTR mNAV": calc_mnav,
         "公司持仓": calc_company_holdings,
         "交易所余额": calc_exchange_reserve,
@@ -379,15 +397,19 @@ def run_dashboard() -> DashboardResult:
                     priority="辅助", url="", description="", method=""
                 )
 
-    # 计算综合评分
-    total_score, recommendation = calculate_total_score(indicators)
+    # 计算双评分（周期分 + 战术分, 含分位数归一化与因子桶明细）
+    scores = compute_dual_scores(indicators, df)
 
     result = DashboardResult(
         timestamp=datetime.now(),
         btc_price=current_price,
         indicators=indicators,
-        total_score=total_score,
-        recommendation=recommendation
+        total_score=scores["cycle_score"],
+        recommendation=scores["cycle_recommendation"],
+        tactical_score=scores["tactical_score"],
+        tactical_recommendation=scores["tactical_recommendation"],
+        cycle_buckets=scores["cycle_buckets"],
+        tactical_buckets=scores["tactical_buckets"],
     )
 
     return result

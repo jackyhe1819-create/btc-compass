@@ -104,12 +104,16 @@ class IndicatorResult:
 
 @dataclass
 class DashboardResult:
-    """仪表盘总结果"""
+    """仪表盘总结果 (BTC Compass: total_score 即周期分, 另含战术分与因子桶明细)"""
     timestamp: datetime
     btc_price: float
     indicators: Dict[str, IndicatorResult]
-    total_score: float
-    recommendation: str
+    total_score: float            # 周期分 (定仓位)
+    recommendation: str           # 仓位建议
+    tactical_score: float = 0.0   # 战术分 (定时机)
+    tactical_recommendation: str = ""
+    cycle_buckets: Optional[Dict] = None     # 周期分因子桶明细
+    tactical_buckets: Optional[Dict] = None  # 战术分因子桶明细
 
 
 # ============================================================

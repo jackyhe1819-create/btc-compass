@@ -19,16 +19,19 @@ _HISTORY_FILE = "score_history.json"
 _MAX_ENTRIES = 730  # 最多保留 2 年
 
 
-# 综合评分档位（与 runner.calculate_total_score 阈值一致）
+# 周期分仓位档位（与 scoring.cycle_recommendation 阈值一致）
 _BANDS = [
-    (0.618, "强烈买入"),
-    (0.382, "买入"),
-    (0.146, "增持"),
-    (-0.146, "持有/观望"),
-    (-0.382, "减仓"),
-    (-0.618, "卖出"),
-    (float("-inf"), "清仓"),
+    (0.618, "重仓区"),
+    (0.382, "偏多配置"),
+    (0.146, "标准配置"),
+    (-0.146, "中性观望"),
+    (-0.382, "减配"),
+    (-0.618, "低配"),
+    (float("-inf"), "防守区"),
 ]
+
+# 分位数归一化后指标分数是连续值, 小幅波动不算「信号变化」
+_MIN_INDICATOR_DELTA = 0.25
 
 
 def _score_band(score: float) -> str:
@@ -96,6 +99,7 @@ def record_score_snapshot(dashboard: dict, cache_dir: str):
         "btc_price": round(float(dashboard.get("btc_price", 0)), 2),
         "total_score": round(float(dashboard.get("total_score", 0)), 4),
         "recommendation": dashboard.get("recommendation", ""),
+        "tactical_score": round(float(dashboard.get("tactical_score", 0)), 4),
         "scores": scores,
         "statuses": statuses,
     }
@@ -140,7 +144,7 @@ def _compute_changes(prev: Optional[dict], curr: dict) -> dict:
         if name not in p_scores:
             continue
         p_val = p_scores[name]
-        if p_val is None or c_val is None or p_val == c_val:
+        if p_val is None or c_val is None or abs(c_val - p_val) < _MIN_INDICATOR_DELTA:
             continue
         result["indicators"].append({
             "name": name,
@@ -173,6 +177,7 @@ def get_score_history(cache_dir: str, days: int = 90) -> dict:
         {
             "date": e["date"],
             "total_score": e.get("total_score"),
+            "tactical_score": e.get("tactical_score"),
             "btc_price": e.get("btc_price"),
             "recommendation": e.get("recommendation", ""),
         }

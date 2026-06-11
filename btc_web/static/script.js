@@ -426,16 +426,26 @@ function renderDashboard(data) {
     // 更新顶部摘要栏
     updateTopSummaryBar(data.btc_price, data.indicators);
 
-    // 更新仪表盘指针
+    // 更新周期分仪表（total_score 即周期分）
     updateGauge(data.total_score);
-
-    // 更新评分
     document.getElementById('scoreValue').textContent = data.total_score.toFixed(2);
-
-    // 更新建议
     const recommendationEl = document.getElementById('recommendation');
     recommendationEl.textContent = data.recommendation;
     recommendationEl.className = 'recommendation ' + getScoreColor(data.total_score);
+    renderBucketBars('cycleBuckets', data.cycle_buckets);
+
+    // 更新战术分仪表
+    if (typeof data.tactical_score === 'number') {
+        updateGauge(data.tactical_score, 'gaugeNeedleTactical');
+        const tv = document.getElementById('tacticalScoreValue');
+        if (tv) tv.textContent = data.tactical_score.toFixed(2);
+        const tr = document.getElementById('tacticalRecommendation');
+        if (tr) {
+            tr.textContent = data.tactical_recommendation || '';
+            tr.className = 'recommendation ' + getScoreColor(data.tactical_score);
+        }
+        renderBucketBars('tacticalBuckets', data.tactical_buckets);
+    }
 
     // 渲染指标
     renderIndicators(data.indicators, data.sparklines);
@@ -704,11 +714,41 @@ function getConclusionClass(indicator) {
 /**
  * 更新仪表盘指针
  */
-function updateGauge(score) {
-    const needle = document.getElementById('gaugeNeedle');
+function updateGauge(score, needleId = 'gaugeNeedle') {
+    const needle = document.getElementById(needleId);
+    if (!needle) return;
     // score 范围是 -1 到 +1，映射到 -90 到 +90 度
     const angle = score * 90;
     needle.style.transform = `translateX(-50%) rotate(${angle}deg)`;
+}
+
+/**
+ * 渲染因子桶得分条 (BTC Compass)
+ */
+function renderBucketBars(containerId, buckets) {
+    const el = document.getElementById(containerId);
+    if (!el || !buckets) return;
+    let html = '';
+    for (const [name, b] of Object.entries(buckets)) {
+        const s = b.score;
+        const hasData = s !== null && s !== undefined;
+        const pct = hasData ? Math.abs(s) * 50 : 0;          // 半宽最大 50%
+        const left = hasData && s < 0 ? 50 - pct : 50;        // 负分向左, 正分向右
+        const color = !hasData ? '#555' : s >= 0.3 ? '#00ff88' : s <= -0.3 ? '#ff4466' : '#ffcc00';
+        const memberTip = (b.members || [])
+            .map(m => `${m.name}: ${m.score === null ? '✕' : m.score}`)
+            .join(' · ');
+        html += `
+            <div class="bucket-row" title="${memberTip}">
+                <span class="bucket-name">${name} <em>${Math.round(b.weight * 100)}%</em></span>
+                <div class="bucket-track">
+                    <div class="bucket-mid"></div>
+                    <div class="bucket-fill" style="left:${left}%; width:${pct}%; background:${color};"></div>
+                </div>
+                <span class="bucket-score" style="color:${color};">${hasData ? (s > 0 ? '+' : '') + s.toFixed(2) : '–'}</span>
+            </div>`;
+    }
+    el.innerHTML = html;
 }
 
 /**
@@ -885,7 +925,7 @@ function createIndicatorCard(indicator) {
     const chartId = `chart-${indicator.name.replace(/\s+/g, '-')}`;
 
     // 支持图表的指标列表
-    const chartableIndicators = ['Ahr999', '恐惧贪婪指数', '资金费率', '多空比', 'Pi Cycle Top'];
+    const chartableIndicators = ['Ahr999', '恐惧贪婪指数', '资金费率', '资金费率(7d)', '多空比', 'Pi Cycle Top'];
     const hasChart = chartableIndicators.includes(indicator.name);
 
     // 构建HTML
@@ -1724,6 +1764,8 @@ function renderScoreHistoryChart(series) {
     const labels = series.map(s => s.date.slice(5)); // MM-DD
     const scores = series.map(s => s.total_score);
     const prices = series.map(s => s.btc_price);
+    const tacticals = series.map(s => (typeof s.tactical_score === 'number' ? s.tactical_score : null));
+    const hasTactical = tacticals.some(v => v !== null);
 
     _scoreHistoryChart = new Chart(canvas, {
         type: 'line',
@@ -1731,7 +1773,7 @@ function renderScoreHistoryChart(series) {
             labels,
             datasets: [
                 {
-                    label: '综合评分',
+                    label: '周期分',
                     data: scores,
                     borderColor: '#f7931a',
                     backgroundColor: '#f7931a18',
@@ -1741,6 +1783,16 @@ function renderScoreHistoryChart(series) {
                     tension: 0.3,
                     yAxisID: 'yScore',
                 },
+                ...(hasTactical ? [{
+                    label: '战术分',
+                    data: tacticals,
+                    borderColor: '#aa66ff',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    fill: false,
+                    tension: 0.3,
+                    yAxisID: 'yScore',
+                }] : []),
                 {
                     label: 'BTC 价格',
                     data: prices,
