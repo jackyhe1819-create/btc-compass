@@ -11,8 +11,14 @@ btc_dashboard.backfill
 - 数据源磁盘缓存 7 天: 重跑/重启不重复打 API (bitcoin-data.com 匿名限 10 req/h)
 - 部分数据源失败 → 当天该指标缺席, 桶内权重自动归一 (与实时评分同一套降级逻辑)
 - 近似声明: MACD/RSI/布林带用日线单周期重建(实时版为多周期聚合);
-  期货基差/多空比/交易所余额无历史数据, 回填期间缺席
+  期货基差/多空比无历史数据, 回填期间缺席
 - 各指标分档阈值与 indicators_v2.py / indicators_short.py 保持一致
+
+2026-06 云端适配 (Render 共享 IP 上 bitcoin-data 限额经常打不通, 回填成功率低):
+- 主链路改为 CoinMetrics 社区 API (免key/云IP友好/T-1): MVRV-Z·NUPL·Puell 由
+  CM 派生 (与 backtest 校准: 相关 0.9996/0.9999/0.94), 价格序列也以 CM 兜底
+- bitcoin-data 降级为可选增强 (STH/SOPR 仅它有; 拿不到当天缺席重归一)
+- 回填因子集同步现网 2026-06 配置: 新增 Ahr999 / 交易所余额(30d) / 交易所净流(7d)
 """
 
 import os
@@ -92,6 +98,47 @@ def _fetch_bd_series(metric: str, field: str, days: int):
         except (KeyError, TypeError, ValueError):
             continue
     return out or None
+
+
+def _fetch_cm_full():
+    """
+    CoinMetrics 社区 API 全历史日度序列 (免key, 云IP友好, T-1)。
+    返回 {"dates": [...], "mcap": [...], "mvrv": [...], "iss": [...],
+          "sply_ex": [...], "net": [...], "price": [...]} 或 None。
+    单页 page_size=10000 覆盖全历史 (~5800 行), 有 next_page_token 则跟进。
+    """
+    metrics = "PriceUSD,CapMrktCurUSD,CapMVRVCur,IssTotUSD,SplyExNtv,FlowInExNtv,FlowOutExNtv"
+    url = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
+    params = {"assets": "btc", "metrics": metrics, "frequency": "1d",
+              "start_time": "2010-07-18", "page_size": 10000}
+    out = {"dates": [], "mcap": [], "mvrv": [], "iss": [],
+           "sply_ex": [], "net": [], "price": []}
+    for _ in range(3):  # 最多 3 页, 防御性上限
+        r = requests.get(url, params=params, timeout=60, headers=_HEADERS)
+        if r.status_code != 200:
+            print(f"⚠️ CoinMetrics API HTTP {r.status_code}")
+            return None
+        payload = r.json() or {}
+        for row in payload.get("data", []):
+            def _f(key):
+                v = row.get(key)
+                try:
+                    return float(v) if v is not None else None
+                except (TypeError, ValueError):
+                    return None
+            out["dates"].append(row["time"][:10])
+            out["price"].append(_f("PriceUSD"))
+            out["mcap"].append(_f("CapMrktCurUSD"))
+            out["mvrv"].append(_f("CapMVRVCur"))
+            out["iss"].append(_f("IssTotUSD"))
+            out["sply_ex"].append(_f("SplyExNtv"))
+            fin, fout = _f("FlowInExNtv"), _f("FlowOutExNtv")
+            out["net"].append((fin - fout) if (fin is not None and fout is not None) else None)
+        token = payload.get("next_page_token")
+        if not token:
+            break
+        params["next_page_token"] = token
+    return out if len(out["dates"]) >= 500 else None
 
 
 def _fetch_fng():
@@ -201,6 +248,14 @@ def _band_stable_growth(pct):
 def _band_halving(months):
     return 1 if months <= 12 else 0 if months <= 24 else -1
 
+def _band_exch_d30(v):
+    # 交易所余额 30日存量变化% (calc_exchange_balance_v2 同阈值)
+    return 1 if v <= -2.1 else 0.5 if v <= -0.85 else 0 if v < 1.3 else -0.5 if v < 2.9 else -1
+
+def _band_netflow7(v):
+    # 交易所净流(7d) 占存量% (calc_exchange_netflow_7d 同阈值)
+    return 1 if v <= -0.8 else 0.5 if v <= -0.4 else 0 if v < 0.45 else -0.5 if v < 1.0 else -1
+
 def _band_rsi(v):
     return -1 if v >= 80 else -0.5 if v >= 70 else 1 if v <= 20 else 0.5 if v <= 30 else 0
 
@@ -224,28 +279,76 @@ def _stub(name: str, score) -> IndicatorResult:
 
 def reconstruct(days: int = 90, cache_dir: str = None) -> list:
     """重建过去 days 天 (不含今天) 的双评分序列, 返回 entry 列表"""
-    df = fetch_btc_data()
-    price = df['price']
+    # ── 主链路: CoinMetrics 全历史 (云IP友好); bitcoin-data 降级为可选增强 ──
+    cm = _cached_fetch(cache_dir, "coinmetrics-full", _fetch_cm_full)
 
-    # ── 拉取所有历史序列（带磁盘缓存）──
     src = {
-        "mvrv":   _cached_fetch(cache_dir, "mvrv-zscore", lambda: _fetch_bd_series("mvrv-zscore", "mvrvZscore", days)),
         "sth":    _cached_fetch(cache_dir, "sth-realized-price", lambda: _fetch_bd_series("sth-realized-price", "sthRealizedPrice", days)),
-        "nupl":   _cached_fetch(cache_dir, "nupl", lambda: _fetch_bd_series("nupl", "nupl", days)),
         "sopr":   _cached_fetch(cache_dir, "sopr", lambda: _fetch_bd_series("sopr", "sopr", days)),
-        "puell":  _cached_fetch(cache_dir, "puell-multiple", lambda: _fetch_bd_series("puell-multiple", "puellMultiple", days)),
         "fng":    _cached_fetch(cache_dir, "fng", _fetch_fng),
         "stable": _cached_fetch(cache_dir, "stablecoins", _fetch_stablecoins),
         "etf":    _cached_fetch(cache_dir, "etf-daily", _fetch_etf_daily),
         "hash":   _cached_fetch(cache_dir, "hashrate-1y", _fetch_hashrate_1y),
         "fund":   _cached_fetch(cache_dir, "funding-history", _fetch_funding_history),
+        "mvrv": None, "nupl": None, "puell": None,   # 下方由 CM 派生或 bd 兜底
     }
-    ok = [k for k, v in src.items() if v]
-    print(f"📦 backfill 数据源: {len(ok)}/10 可用 ({', '.join(ok)})")
-    # 链上核心序列至少要有 3 个, 否则视为本轮失败 (调用方稍后重试)
-    core_ok = sum(1 for k in ("mvrv", "sth", "nupl", "sopr", "puell") if src[k])
-    if core_ok < 3:
-        raise RuntimeError(f"链上核心序列仅 {core_ok}/5 可用, 放弃本轮回填")
+
+    # ── CM 派生: MVRV-Z / NUPL / Puell / 交易所余额Δ30 / 净流7d (与 backtest 同公式) ──
+    exch30 = netflow7 = None
+    cm_price_s = None
+    if cm:
+        cm_idx = pd.to_datetime(cm["dates"])
+        mc = pd.Series(cm["mcap"], index=cm_idx, dtype=float)
+        mvr = pd.Series(cm["mvrv"], index=cm_idx, dtype=float).replace(0, np.nan)
+        rc = mc / mvr
+        z_s = (mc - rc) / mc.expanding(min_periods=365).std()
+        nupl_s = 1 - 1 / mvr
+        iss = pd.Series(cm["iss"], index=cm_idx, dtype=float)
+        puell_s = iss / iss.rolling(365).mean()
+        sply = pd.Series(cm["sply_ex"], index=cm_idx, dtype=float)
+        exch30_s = (sply / sply.shift(30) - 1) * 100
+        net_s = pd.Series(cm["net"], index=cm_idx, dtype=float)
+        netflow7_s = net_s.rolling(7).sum() / sply * 100
+
+        def _tail_dict(s, n=days + 40):
+            sub = s.tail(n).dropna()
+            return {ts.strftime("%Y-%m-%d"): float(v) for ts, v in sub.items()} or None
+
+        src["mvrv"] = _tail_dict(z_s)
+        src["nupl"] = _tail_dict(nupl_s)
+        src["puell"] = _tail_dict(puell_s)
+        exch30 = _tail_dict(exch30_s)
+        netflow7 = _tail_dict(netflow7_s)
+        cm_price_s = pd.Series(cm["price"], index=cm_idx, dtype=float).dropna()
+
+    # CM 失败时回退 bitcoin-data 序列 (旧链路)
+    if src["mvrv"] is None:
+        src["mvrv"] = _cached_fetch(cache_dir, "mvrv-zscore", lambda: _fetch_bd_series("mvrv-zscore", "mvrvZscore", days))
+    if src["nupl"] is None:
+        src["nupl"] = _cached_fetch(cache_dir, "nupl", lambda: _fetch_bd_series("nupl", "nupl", days))
+    if src["puell"] is None:
+        src["puell"] = _cached_fetch(cache_dir, "puell-multiple", lambda: _fetch_bd_series("puell-multiple", "puellMultiple", days))
+
+    ok = [k for k, v in src.items() if v] + (["cm"] if cm else [])
+    print(f"📦 backfill 数据源: {len(ok)}/11 可用 ({', '.join(ok)})")
+    # 门槛: CM 可用即放行; 否则按旧规则要求 bd 核心序列 ≥3
+    if not cm:
+        core_ok = sum(1 for k in ("mvrv", "sth", "nupl", "sopr", "puell") if src[k])
+        if core_ok < 3:
+            raise RuntimeError(f"CM 不可用且链上核心序列仅 {core_ok}/5, 放弃本轮回填")
+
+    # ── 价格序列: 常规链路失败时用 CM 价格兜底 (回填不含今天, T-1 足够) ──
+    df = None
+    try:
+        df = fetch_btc_data()
+    except Exception as e:
+        print(f"⚠️ fetch_btc_data 失败: {e}")
+    if (df is None or len(df) < 400) and cm_price_s is not None and len(cm_price_s) > 1400:
+        print("↩️ 价格序列改用 CoinMetrics 兜底")
+        df = pd.DataFrame({"price": cm_price_s})
+    if df is None or len(df) < 400:
+        raise RuntimeError("价格序列不可用 (常规链路与 CM 兜底均失败)")
+    price = df['price']
 
     # ── 预计算 df 派生序列 ──
     ma111 = price.rolling(111).mean()
@@ -259,6 +362,9 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
     with np.errstate(invalid='ignore', divide='ignore'):
         fair = 10 ** (AHR999_B * np.log10(np.where(days_geo > 0, days_geo, np.nan)) + AHR999_A)
     plaw_s = pd.Series(price.values / fair, index=df.index)
+    # Ahr999 = (价格/200日几何均价) × (价格/幂律估值), 与 scoring 同公式
+    geo200 = np.exp(np.log(price).rolling(200).mean())
+    ahr_s = (price / geo200) * plaw_s
 
     ema12 = price.ewm(span=12, adjust=False).mean()
     ema26 = price.ewm(span=26, adjust=False).mean()
@@ -300,7 +406,8 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
         inds = {}
 
         # 趋势伸展 (分位数) + Pi Cycle
-        for name, s in (("Mayer Multiple", mayer_s), ("200-Week Heatmap", w200_s), ("幂律走廊", plaw_s)):
+        for name, s in (("Mayer Multiple", mayer_s), ("200-Week Heatmap", w200_s),
+                        ("幂律走廊", plaw_s), ("Ahr999", ahr_s)):
             sc = _percentile_at(s, ts)
             if not np.isnan(sc):
                 inds[name] = _stub(name, sc)
@@ -319,6 +426,9 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
         nu = _at(src["nupl"], d)
         if nu is not None:
             inds["NUPL"] = _stub("NUPL", _band_nupl(nu))
+        ex30 = _at(exch30, d)
+        if ex30 is not None:
+            inds["交易所余额"] = _stub("交易所余额", _band_exch_d30(ex30))
 
         # 资金流
         if etf_5d is not None and ts in etf_5d.index and not np.isnan(etf_5d.loc[ts]):
@@ -387,6 +497,9 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
         so = _at(src["sopr"], d)
         if so is not None:
             inds["SOPR"] = _stub("SOPR", _band_sopr(so))
+        nf7 = _at(netflow7, d)
+        if nf7 is not None:
+            inds["交易所净流(7d)"] = _stub("交易所净流(7d)", _band_netflow7(nf7))
         # 日线单周期近似 (实时版为多周期聚合)
         if not np.isnan(macd_line.loc[ts]) and not np.isnan(macd_sig.loc[ts]):
             inds["MACD"] = _stub("MACD", 0.5 if macd_line.loc[ts] > macd_sig.loc[ts] else -0.5)
