@@ -16,7 +16,7 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>₿</text></svg>">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-2">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-3">
     <!-- 防止主题闪烁：在 CSS 加载前立即恢复主题（v2: 默认米白色） -->
     <script>
         (function() {
@@ -161,7 +161,7 @@
                                     <h4>周期分因子桶</h4>
                                     <div class="weight-group">
                                         <span class="weight-label">趋势伸展 25%</span>
-                                        <span class="weight-detail">Mayer · 200W · 幂律 · Pi Cycle（滚动4年分位数归一化，自适应周期振幅衰减）</span>
+                                        <span class="weight-detail">Mayer · 200W · 幂律 · Pi Cycle · Ahr999（滚动4年分位数归一化，自适应周期振幅衰减）</span>
                                     </div>
                                     <div class="weight-group">
                                         <span class="weight-label">链上筹码 25%</span>
@@ -187,16 +187,20 @@
                                 <div class="explain-section">
                                     <h4>战术分因子桶</h4>
                                     <div class="weight-group">
-                                        <span class="weight-label">杠杆温度 40%</span>
+                                        <span class="weight-label">杠杆温度 35%</span>
                                         <span class="weight-detail">资金费率7日均 · 期货年化基差 · 多空比（逆向）</span>
                                     </div>
                                     <div class="weight-group">
-                                        <span class="weight-label">动量结构 35%</span>
+                                        <span class="weight-label">动量结构 30%</span>
                                         <span class="weight-detail">MACD 35% · RSI 30% · SOPR(链上盈亏兑现) 25% · 布林带 10%</span>
                                     </div>
                                     <div class="weight-group">
-                                        <span class="weight-label">市场情绪 25%</span>
+                                        <span class="weight-label">市场情绪 20%</span>
                                         <span class="weight-detail">恐惧贪婪（仅 ≤30 / ≥70 极值计分）</span>
+                                    </div>
+                                    <div class="weight-group">
+                                        <span class="weight-label">链上资金流 15%</span>
+                                        <span class="weight-detail">交易所净流7日 · CoinMetrics 全市场流量（流出=买盘提币=看多）</span>
                                     </div>
                                 </div>
                                 <div class="explain-section">
@@ -841,7 +845,7 @@
         <p style="margin: 6px 0 0 0; font-size: 0.75rem; color: #666;">点击地址即可复制</p>
     </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}?v=compass-2"></script>
+    <script src="{{ url_for('static', filename='script.js') }}?v=compass-3"></script>
 </body>
 
 </html>

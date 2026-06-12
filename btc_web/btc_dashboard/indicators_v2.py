@@ -589,3 +589,143 @@ def calc_hash_ribbons() -> IndicatorResult:
         url="https://charts.bitbo.io/hash-ribbons/",
         description="算力 30 日均线 vs 60 日均线：下穿 = 矿工投降（出清弱矿工），重新上穿 = 投降结束，历史上是胜率极高的买点确认信号。本质是买点指标，无对称卖出信号。",
         method="mempool.space 90 天日度算力，SMA30 上穿 SMA60 且 45 天内 → +1；维持上方 +0.25；下方(投降中) -0.25。6h 缓存。")
+
+
+# ============================================================
+# 交易所余额 v2 — CoinMetrics 社区 API (2026-06 重构)
+#
+# 旧实现: mempool.space 轮询 11 个硬编码冷钱包 (~60万 BTC 覆盖),
+#         与"上次快照"对比 ±0.5%/±2% 打分 → 94.5% 的天数打 0 分, 接近哑因子。
+# 新实现: CoinMetrics 社区 API (免key, T-1 日滞后, 追踪全市场 ~265万 BTC),
+#         30 日存量变化率按 2018+ 历史分位数打分 (回测 IC: 30d +0.065 / 90d +0.102)。
+# 降级链: CoinMetrics → 旧版 mempool.space 快照对比。
+# ============================================================
+
+def _cm_exchange_series():
+    """
+    CoinMetrics 社区 API: 近 420 天交易所 BTC 存量与进出流量。
+    返回 {"dates": [...], "sply": [...], "net": [...]} 或 None。6h 缓存。
+    """
+    def _fetch():
+        from datetime import date, timedelta
+        start = (date.today() - timedelta(days=420)).isoformat()
+        r = requests.get(
+            "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics",
+            params={"assets": "btc",
+                    "metrics": "SplyExNtv,FlowInExNtv,FlowOutExNtv",
+                    "frequency": "1d", "start_time": start, "page_size": 500},
+            timeout=20, headers=_HEADERS)
+        if r.status_code != 200:
+            return None
+        rows = (r.json() or {}).get("data", [])
+        dates, sply, net = [], [], []
+        for it in rows:
+            try:
+                s = float(it["SplyExNtv"])
+                fin = float(it.get("FlowInExNtv") or 0)
+                fout = float(it.get("FlowOutExNtv") or 0)
+            except (KeyError, TypeError, ValueError):
+                continue
+            dates.append(it["time"][:10])
+            sply.append(s)
+            net.append(fin - fout)
+        if len(sply) < 31:
+            return None
+        return {"dates": dates, "sply": sply, "net": net}
+
+    return _cached_onchain("cm-exchange", _fetch)
+
+
+def calc_exchange_balance_v2() -> IndicatorResult:
+    """
+    交易所余额 — 30 日存量变化率, 分位数校准打分。
+    阈值 = 2018+ 全样本 Δ30d 分布的 10/25/75/90 分位 (backtest 2026-06 校准):
+      ≤-2.1% 强流出 +1 | ≤-0.85% 流出 +0.5 | <+1.3% 中性 0 | <+2.9% 流入 -0.5 | ≥+2.9% 强流入 -1
+    """
+    data = _cm_exchange_series()
+
+    if not data:
+        # 降级: 旧版 mempool.space 冷钱包快照对比
+        try:
+            from .indicators_aux import calc_exchange_reserve
+            legacy = calc_exchange_reserve()
+            legacy.method = f"[降级备源] {legacy.method}"
+            return legacy
+        except Exception as e:
+            print(f"⚠️ 交易所余额降级源也失败: {e}")
+            return IndicatorResult(
+                name="交易所余额", value=float('nan'), score=0, color="⚪",
+                status="数据源暂不可用", priority="P2",
+                url="https://studio.glassnode.com/metrics?a=BTC&m=distribution.BalanceExchanges",
+                description="交易所 BTC 存量 30 日变化率。", method="主备数据源均不可用。")
+
+    sply, net = data["sply"], data["net"]
+    cur, prev30 = sply[-1], sply[-31]
+    d30_pct = (cur / prev30 - 1) * 100
+    net7_btc = sum(net[-7:])
+    net7_pct = net7_btc / cur * 100
+
+    if d30_pct <= -2.1:
+        score, color, label = 1, "🟢", "强劲流出 — 筹码加速离场"
+    elif d30_pct <= -0.85:
+        score, color, label = 0.5, "🟢", "持续流出 — 自托管/吸筹"
+    elif d30_pct < 1.3:
+        score, color, label = 0, "🟡", "存量平稳"
+    elif d30_pct < 2.9:
+        score, color, label = -0.5, "🟠", "持续流入 — 潜在卖压"
+    else:
+        score, color, label = -1, "🔴", "大举流入 — 抛压预警"
+
+    return IndicatorResult(
+        name="交易所余额",
+        value=round(d30_pct, 2),
+        score=score,
+        color=color,
+        status=(f"{label} (30日 {d30_pct:+.2f}%) | 存量 {cur/1e6:.2f}M BTC"
+                f" | 7日净流 {net7_btc:+,.0f} BTC ({net7_pct:+.2f}%)"),
+        priority="P2",
+        url="https://studio.glassnode.com/metrics?a=BTC&m=distribution.BalanceExchanges",
+        description=("全市场交易所 BTC 存量的 30 日变化率（CoinMetrics 机构级聚合, ~265万 BTC, "
+                     "T-1 日度更新）。存量下降 = 提币自托管/吸筹（看多），上升 = 充值待卖（看空）。"
+                     "回测 (2018-2026) 该信号 30/90 天前瞻 IC +0.07/+0.10。"),
+        method=("CoinMetrics 社区 API SplyExNtv 30 日变化率, 按 2018+ 历史分布分位数打分 "
+                "(10/25/75/90 分位 ≈ -2.1/-0.85/+1.3/+2.9%)。每档触发频率 ~10-15%, "
+                "替代旧版'快照对比±0.5%/2%'(94.5%时间无信号)。6h 缓存, 失败降级 mempool.space。"))
+
+
+def calc_exchange_netflow_7d() -> IndicatorResult:
+    """
+    交易所净流(7d) — 战术级短窗口版本 (尚未接入战术分桶, 待启用)。
+    回测 (2018-2026): 7d 净流/存量 在 7-14 天前瞻上 IC +0.10~+0.13,
+    高于杠杆温度桶现有的资金费率因子。
+    阈值 = 2018+ 7d净流/存量 分布的 10/25/75/90 分位。
+    """
+    data = _cm_exchange_series()
+    if not data:
+        return IndicatorResult(
+            name="交易所净流(7d)", value=float('nan'), score=0, color="⚪",
+            status="数据源暂不可用", priority="P1",
+            url="https://studio.glassnode.com/metrics?a=BTC&m=distribution.BalanceExchanges",
+            description="7 日交易所净流入占存量比例。", method="CoinMetrics 社区 API 暂不可用。")
+
+    sply, net = data["sply"], data["net"]
+    net7_pct = sum(net[-7:]) / sply[-1] * 100
+
+    if net7_pct <= -0.8:
+        score, color, label = 1, "🟢", "强劲净流出"
+    elif net7_pct <= -0.4:
+        score, color, label = 0.5, "🟢", "净流出"
+    elif net7_pct < 0.45:
+        score, color, label = 0, "🟡", "基本平衡"
+    elif net7_pct < 1.0:
+        score, color, label = -0.5, "🟠", "净流入"
+    else:
+        score, color, label = -1, "🔴", "大幅净流入"
+
+    return IndicatorResult(
+        name="交易所净流(7d)", value=round(net7_pct, 3), score=score, color=color,
+        status=f"{label} (7日 {net7_pct:+.2f}% 存量)", priority="P1",
+        url="https://studio.glassnode.com/metrics?a=BTC&m=distribution.BalanceExchanges",
+        description="7 日交易所净流入占存量比例 — 短线供需信号。流出 = 买盘提币（看多）。",
+        method="CoinMetrics 社区 API (FlowInExNtv-FlowOutExNtv) 7 日合计 / 存量, "
+               "2018+ 分位数阈值 (-0.8/-0.4/+0.45/+1.0%)。6h 缓存。")

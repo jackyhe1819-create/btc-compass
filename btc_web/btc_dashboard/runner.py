@@ -37,6 +37,7 @@ from .indicators_v2 import (
     calc_fear_greed_v2,
     calc_sth_realized_price, calc_nupl, calc_sopr,
     calc_puell_multiple, calc_hash_ribbons,
+    calc_exchange_balance_v2, calc_exchange_netflow_7d,
 )
 from .scoring import compute_dual_scores
 # 历史数据函数（sparkline 用，部分指标无法从 df 推导，回退至 API）
@@ -386,7 +387,8 @@ def run_dashboard() -> DashboardResult:
         "BTC市占率": calc_btc_dominance,
         "MSTR mNAV": calc_mnav,
         "公司持仓": calc_company_holdings,
-        "交易所余额": calc_exchange_reserve,
+        "交易所余额": calc_exchange_balance_v2,  # CM社区API主源, 失败自动降级 mempool.space
+        "交易所净流(7d)": calc_exchange_netflow_7d,  # 战术分·链上资金流桶 (2026-06)
         "全网算力": calc_hashrate,
     }
 

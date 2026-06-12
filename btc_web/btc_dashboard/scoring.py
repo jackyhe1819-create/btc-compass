@@ -34,7 +34,9 @@ from .core import IndicatorResult, GENESIS_DATE, AHR999_A, AHR999_B
 CYCLE_BUCKETS = {
     "趋势伸展": {
         "weight": 0.25,
-        "members": ["Mayer Multiple", "200-Week Heatmap", "幂律走廊", "Pi Cycle Top"],
+        # Ahr999 于 2026-06 加入: 虽与桶平均相关 0.92, 但其乘积结构 (Mayer类×幂律)
+        # 放大周期极值共振, 回测加入后周期分 IC 全窗口提升 (365d 0.440→0.475)
+        "members": ["Mayer Multiple", "200-Week Heatmap", "幂律走廊", "Pi Cycle Top", "Ahr999"],
         "note": "价格相对长期趋势的拉伸程度（分位数归一化）",
     },
     "链上筹码": {
@@ -66,19 +68,26 @@ CYCLE_BUCKETS = {
 
 TACTICAL_BUCKETS = {
     "杠杆温度": {
-        "weight": 0.40,
+        "weight": 0.35,
         "members": ["资金费率(7d)", "期货基差", "多空比"],
         "note": "衍生品市场的拥挤度（逆向）",
     },
     "动量结构": {
-        "weight": 0.35,
+        "weight": 0.30,
         "members": ["MACD", "RSI(14)", "SOPR", "布林带"],
         "note": "多周期动量 + 链上盈亏兑现（SOPR）",
     },
     "市场情绪": {
-        "weight": 0.25,
+        "weight": 0.20,
         "members": ["恐惧贪婪指数"],
         "note": "仅极值计分的逆向情绪",
+    },
+    # 2026-06 新增: 交易所净流(7d) — CoinMetrics 全市场流量
+    # 回测 (2018-2026) 7-14d 前瞻 IC +0.10~+0.13, 高于资金费率因子
+    "链上资金流": {
+        "weight": 0.15,
+        "members": ["交易所净流(7d)"],
+        "note": "7日交易所净流向 — 短线供需（流出=买盘提币）",
     },
 }
 
@@ -142,6 +151,9 @@ def compute_percentile_overrides(df: pd.DataFrame) -> Dict[str, Tuple[float, str
     metrics["Golden Ratio"] = price / price.rolling(350).mean()
     # 均衡价格: 价格 / ((MA150+MA350)/2)
     metrics["均衡价格"] = price / ((price.rolling(150).mean() + price.rolling(350).mean()) / 2)
+    # Ahr999: (价格/200日几何均价) × (价格/幂律估值) — 乘积放大周期极值共振
+    geo200 = np.exp(np.log(price).rolling(200).mean())
+    metrics["Ahr999"] = (price / geo200) * pd.Series(price.values / fair, index=df.index)
 
     for name, series in metrics.items():
         sc = _percentile_score(series)
