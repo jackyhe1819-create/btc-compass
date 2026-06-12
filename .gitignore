@@ -51,3 +51,6 @@ docs/superpowers/
 compass_server.log
 btc_web/exchange_balance_history.json
 exchange_balance_history.json
+
+# 回测中间产物 (可由 run_backtest.py 再生成; 报告与图表入库)
+backtest/output/*.csv
