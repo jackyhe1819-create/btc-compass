@@ -267,38 +267,74 @@ def calc_long_short_ratio() -> IndicatorResult:
     )
 
 
-def calc_btc_dominance() -> IndicatorResult:
+def _fetch_btc_dominance():
     """
-    BTC 市占率 (Dominance)
-    - 主源: CoinGecko Global API
-    - 备源: CoinPaprika /global  （CoinGecko 在云 IP 上常被限流）
+    四级备源链, 返回 (btc_d, src) 或 None。
+    口径说明: CoinGecko/CoinPaprika/CoinLore 为全币种分母 (~58%);
+    alternative.me 仅 ~3000 币, 读数系统性偏高 4-5pp, 故置末位并标注。
     """
-    btc_d = None
-    src = ""
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 
-    # 主源 CoinGecko
+    # 1. CoinGecko (本地 IP 通常可用; 云 IP 常被限流)
     try:
         r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10, headers=headers)
         if r.status_code == 200:
-            btc_d = r.json()["data"]["market_cap_percentage"]["btc"]
-            src = "CoinGecko"
-        else:
-            print(f"⚠️ CoinGecko Global 返回 {r.status_code}")
+            return float(r.json()["data"]["market_cap_percentage"]["btc"]), "CoinGecko"
+        print(f"⚠️ CoinGecko Global 返回 {r.status_code}")
     except Exception as e:
         print(f"⚠️ CoinGecko Global API 失败: {e}")
 
-    # 备源 CoinPaprika
-    if btc_d is None:
-        try:
-            r = requests.get("https://api.coinpaprika.com/v1/global", timeout=10, headers=headers)
-            if r.status_code == 200:
-                btc_d = r.json().get("bitcoin_dominance_percentage")
-                src = "CoinPaprika"
-            else:
-                print(f"⚠️ CoinPaprika Global 返回 {r.status_code}")
-        except Exception as e:
-            print(f"⚠️ CoinPaprika Global API 失败: {e}")
+    # 2. CoinPaprika
+    try:
+        r = requests.get("https://api.coinpaprika.com/v1/global", timeout=10, headers=headers)
+        if r.status_code == 200:
+            v = r.json().get("bitcoin_dominance_percentage")
+            if v is not None:
+                return float(v), "CoinPaprika"
+        else:
+            print(f"⚠️ CoinPaprika Global 返回 {r.status_code}")
+    except Exception as e:
+        print(f"⚠️ CoinPaprika Global API 失败: {e}")
+
+    # 3. CoinLore (云 IP 友好, 与 CoinGecko 同口径)
+    try:
+        r = requests.get("https://api.coinlore.net/api/global/", timeout=10, headers=headers)
+        if r.status_code == 200:
+            arr = r.json()
+            if isinstance(arr, list) and arr and arr[0].get("btc_d"):
+                return float(arr[0]["btc_d"]), "CoinLore"
+        else:
+            print(f"⚠️ CoinLore Global 返回 {r.status_code}")
+    except Exception as e:
+        print(f"⚠️ CoinLore Global API 失败: {e}")
+
+    # 4. alternative.me (云 IP 友好但分母小、读数偏高, 仅兜底)
+    try:
+        r = requests.get("https://api.alternative.me/v2/global/", timeout=10, headers=headers)
+        if r.status_code == 200:
+            v = (r.json().get("data") or {}).get("bitcoin_percentage_of_market_cap")
+            if v is not None:
+                v = float(v)
+                if v <= 1.5:  # 该接口历史上返回过小数形式
+                    v *= 100
+                return v, "alternative.me·窄口径"
+        else:
+            print(f"⚠️ alternative.me Global 返回 {r.status_code}")
+    except Exception as e:
+        print(f"⚠️ alternative.me Global API 失败: {e}")
+
+    return None
+
+
+def calc_btc_dominance() -> IndicatorResult:
+    """
+    BTC 市占率 (Dominance)
+    - 四级备源: CoinGecko → CoinPaprika → CoinLore → alternative.me
+    - 6h TTL 缓存 (慢变量, 同时避免高频轰 CoinGecko 招致云 IP 限流)
+    """
+    from .indicators_v2 import _cached_onchain
+    pair = _cached_onchain("btc-dominance", _fetch_btc_dominance)
+    btc_d, src = pair if pair else (None, "")
 
     if btc_d is None:
         return IndicatorResult(
@@ -331,7 +367,7 @@ def calc_btc_dominance() -> IndicatorResult:
         priority="P2",
         url="https://coinmarketcap.com/charts/bitcoin-dominance/",
         description="比特币市值占加密货币总市值的比例，反映了比特币在市场中的主导地位。",
-        method=f"主源 CoinGecko → 备源 CoinPaprika（本次：{src}）。牛市初期，BTC市占率通常上涨（吸血效应）；牛市后期，随着资金流向山寨币，BTC市占率可能下降（山寨季）。"
+        method=f"四级备源 CoinGecko → CoinPaprika → CoinLore → alternative.me（本次：{src}），6h 缓存。牛市初期，BTC市占率通常上涨（吸血效应）；牛市后期，随着资金流向山寨币，BTC市占率可能下降（山寨季）。"
     )
 
 def fetch_etf_volume() -> Tuple[float, float, str]:
