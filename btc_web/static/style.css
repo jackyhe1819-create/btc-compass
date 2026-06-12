@@ -480,10 +480,11 @@ body::before {
 }
 
 .gauge-container {
+    grid-area: gauge;
     background: var(--bg-card);
     backdrop-filter: blur(20px);
     border: 1px solid var(--border-color);
-    border-radius: 24px;
+    border-radius: 16px;
     padding: 40px 60px;
     text-align: center;
     box-shadow: var(--shadow-card);
@@ -734,24 +735,36 @@ body::before {
     font-size: 0.68rem;
 }
 
-/* Score + Summary Container */
+/* Score + Summary Container
+   901-1359px: 仪表卡独占首行, 指标总览+更多看板第二行等高
+   ≥1360px:   三卡同行等高 (见下方媒体查询) */
 .score-summary-container {
-    display: flex;
-    gap: 30px;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    justify-content: center;
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    grid-template-areas:
+        "gauge gauge"
+        "summary ext";
+    gap: 24px;
+    align-items: stretch;
+}
+
+@media (min-width: 1360px) {
+    .score-summary-container {
+        grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 280px;
+        grid-template-areas: "gauge summary ext";
+    }
 }
 
 /* Summary Table Styles */
 .summary-table-container {
+    grid-area: summary;
     background: var(--bg-card);
     backdrop-filter: blur(20px);
     border: 1px solid var(--border-color);
     border-radius: 16px;
     padding: 20px;
-    min-width: 380px;
-    max-width: 480px;
+    min-width: 0;
     display: flex;
     flex-direction: column;
 }
@@ -791,9 +804,20 @@ body::before {
 
 .summary-table-scroll {
     flex: 1;
+    min-height: 0;
+    position: relative;
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: rgba(247, 147, 26, 0.4) transparent;
+}
+
+/* 表格绝对定位: 内容高度不参与 grid 行高计算,
+   行高由仪表卡/更多看板决定, 表格在卡内滚动 */
+.summary-table-scroll > .summary-table {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
 }
 
 .summary-table-scroll::-webkit-scrollbar {
@@ -820,19 +844,25 @@ body::before {
 
 /* External Links Module */
 .ext-links-container {
+    grid-area: ext;
     background: var(--bg-card);
     backdrop-filter: blur(20px);
     border: 1px solid var(--border-color);
     border-radius: 16px;
     padding: 20px;
-    min-width: 220px;
-    max-width: 280px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .ext-links-list {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    justify-content: space-between;
 }
 
 .ext-link-item {
@@ -1814,28 +1844,25 @@ body::before {
         height: 350px;
     }
 
-    /* Score section */
+    /* Score section: 单列堆叠 */
     .score-summary-container {
-        flex-direction: column;
-        align-items: center;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+            "gauge"
+            "summary"
+            "ext";
         gap: 20px;
     }
 
     .gauge-container {
         padding: 25px 20px;
-        width: 100%;
     }
 
-    .summary-table-container {
-        min-width: unset;
-        max-width: unset;
-        width: 100%;
-    }
-
-    .ext-links-container {
-        min-width: unset;
-        max-width: unset;
-        width: 100%;
+    /* 堆叠时表格固定高度滚动, 避免页面被撑爆
+       (表格为绝对定位, 不撑开容器, 需显式高度) */
+    .summary-table-scroll {
+        flex: none;
+        height: 460px;
     }
 
     /* News: stack vertically on tablet */
@@ -2870,8 +2897,8 @@ body::before {
 /* 双仪表并排 (宽屏两列, 窄屏自动单列) */
 .dual-gauges {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-    gap: 8px 36px;
+    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+    gap: 8px 20px;
     align-items: start;
     justify-items: center;
 }
@@ -2880,7 +2907,7 @@ body::before {
     max-width: 360px;
 }
 .gauge-container {
-    padding: 32px 36px;
+    padding: 24px 24px 28px;
 }
 @media (max-width: 768px) {
     .dual-gauges { gap: 24px; }

@@ -148,20 +148,6 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchNewsData();
     });
 
-    // 指标总览高度与"更多看板"对齐
-    function syncSummaryHeight() {
-        const ext = document.querySelector('.ext-links-container');
-        const summary = document.querySelector('.summary-table-container');
-        if (!ext || !summary) return;
-        const extH = ext.getBoundingClientRect().height;
-        if (extH > 0) {
-            summary.style.height = extH + 'px';
-        }
-    }
-    // 页面渲染后执行，并在窗口大小变化时重算
-    setTimeout(syncSummaryHeight, 100);
-    window.addEventListener('resize', syncSummaryHeight);
-
     renderSkeletons();
     fetchDashboardData();
     setInterval(fetchDashboardData, REFRESH_INTERVAL);
