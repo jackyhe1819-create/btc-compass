@@ -747,6 +747,178 @@ def get_mnav_history(df: pd.DataFrame = None, days: int = 30) -> dict:
         return {"indicator": "MSTR mNAV", "dates": [], "values": [], "thresholds": {}}
 
 
+_BD_HEADERS = {"User-Agent": "btc-compass/1.0"}
+
+# CoinMetrics 社区 API 历史缓存 (进程级, 一小时 TTL, 单次请求覆盖 MVRV/NUPL/Puell 三指标)
+import threading as _hist_threading
+import time as _hist_time
+
+_cm_hist_cache = None
+_cm_hist_ts = 0
+_cm_hist_lock = _hist_threading.Lock()
+_CM_HIST_TTL = 3600
+
+
+def _fetch_cm_history(days: int):
+    """CoinMetrics 社区 API → {dates, mvrv_z, nupl, puell} 最近 days 天
+    与 backfill.py 相同的 metrics 组合 (社区 tier 可用), Z-Score 和 NUPL 从 MVRV ratio 派生"""
+    global _cm_hist_cache, _cm_hist_ts
+    now = _hist_time.time()
+    with _cm_hist_lock:
+        if _cm_hist_cache and (now - _cm_hist_ts) < _CM_HIST_TTL:
+            c = _cm_hist_cache
+            return {k: v[-days:] for k, v in c.items()}
+    try:
+        metrics = "PriceUSD,CapMrktCurUSD,CapMVRVCur,IssTotUSD"
+        r = requests.get(
+            "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics",
+            params={"assets": "btc", "metrics": metrics, "frequency": "1d",
+                    "start_time": "2010-07-18", "page_size": 10000},
+            timeout=30, headers=_BD_HEADERS)
+        if r.status_code != 200:
+            return None
+        rows = r.json().get("data", [])
+        if len(rows) < 500:
+            return None
+
+        dates, mvrv_raw, mcap_raw, iss_raw = [], [], [], []
+        for row in rows:
+            def _f(k):
+                v = row.get(k)
+                try:
+                    return float(v) if v is not None else None
+                except (TypeError, ValueError):
+                    return None
+            dates.append(row["time"][:10])
+            mvrv_raw.append(_f("CapMVRVCur"))
+            mcap_raw.append(_f("CapMrktCurUSD"))
+            iss_raw.append(_f("IssTotUSD"))
+
+        mvrv_s = pd.Series(mvrv_raw, dtype=float).replace(0, np.nan)
+        mcap_s = pd.Series(mcap_raw, dtype=float)
+        iss_s = pd.Series(iss_raw, dtype=float)
+
+        rcap_s = mcap_s / mvrv_s
+        mvrv_z = ((mcap_s - rcap_s) / mcap_s.rolling(730).std()).round(4).tolist()
+        nupl = (1 - 1 / mvrv_s).round(4).tolist()
+        puell = (iss_s / iss_s.rolling(365).mean()).round(4).tolist()
+
+        result = {"dates": dates, "mvrv_z": mvrv_z, "nupl": nupl, "puell": puell}
+        with _cm_hist_lock:
+            _cm_hist_cache = result
+            _cm_hist_ts = now
+        return {k: v[-days:] for k, v in result.items()}
+    except Exception as e:
+        print(f"⚠️ CoinMetrics history 失败: {e}")
+        return None
+
+
+def _fetch_bd_history(metric: str, field: str, days: int):
+    """bitcoin-data.com 范围端点 → (dates, values) 或 ([], [])"""
+    start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
+    end = datetime.now().strftime("%Y-%m-%d")
+    try:
+        r = requests.get(f"https://bitcoin-data.com/v1/{metric}",
+                         params={"startday": start, "endday": end},
+                         timeout=15, headers=_BD_HEADERS)
+        if r.status_code != 200:
+            return [], []
+        rows = sorted(r.json(), key=lambda x: x["d"])[-days:]
+        dates = [row["d"] for row in rows]
+        values = [round(float(row[field]), 4) for row in rows]
+        return dates, values
+    except Exception as e:
+        print(f"⚠️ bitcoin-data {metric} history 失败: {e}")
+        return [], []
+
+
+def _clean_nans(dates, values):
+    """过滤掉 NaN 值的日期和数值对"""
+    out_d, out_v = [], []
+    for d, v in zip(dates, values):
+        if v is not None and v == v:
+            out_d.append(d)
+            out_v.append(v)
+    return out_d, out_v
+
+
+def get_mvrv_z_history(days: int = 30) -> dict:
+    """MVRV Z-Score 历史 — 主源 CoinMetrics, 备源 bitcoin-data"""
+    cm = _fetch_cm_history(days)
+    if cm and cm.get("dates"):
+        dates, values = _clean_nans(cm["dates"], cm["mvrv_z"])
+    else:
+        dates, values = _fetch_bd_history("mvrv-zscore", "mvrvZscore", days)
+    return {
+        "indicator": "MVRV-Z", "dates": dates, "values": values,
+        "thresholds": {
+            "底部带": {"value": 0, "color": "#00d26a", "label": "底部带 (Z<0)"},
+            "中性":   {"value": 3, "color": "#ffcc00", "label": "中性 (Z<3)"},
+            "顶部带": {"value": 5, "color": "#ff4444", "label": "顶部带 (Z≥5)"},
+        }
+    }
+
+
+def get_sth_cost_history(df: pd.DataFrame, days: int = 30) -> dict:
+    """STH 成本线历史 — 仅 bitcoin-data 有此指标"""
+    dates, sth_prices = _fetch_bd_history("sth-realized-price", "sthRealizedPrice", days)
+    if not dates or df is None or df.empty:
+        return {"indicator": "STH成本线", "dates": [], "values": [], "thresholds": {}}
+    recent = df.tail(days + 10)
+    ratios, out_dates = [], []
+    for d, sth_p in zip(dates, sth_prices):
+        try:
+            ts = pd.Timestamp(d)
+            if ts in recent.index and sth_p > 0:
+                ratios.append(round(recent.loc[ts, 'price'] / sth_p, 3))
+                out_dates.append(d)
+        except (KeyError, TypeError):
+            continue
+    return {
+        "indicator": "STH成本线", "dates": out_dates, "values": ratios,
+        "thresholds": {
+            "投降带": {"value": 0.80, "color": "#00d26a", "label": "投降带 (<0.8)"},
+            "成本线": {"value": 1.00, "color": "#ffcc00", "label": "成本线 (1.0)"},
+            "过热":   {"value": 1.35, "color": "#ff4444", "label": "过热 (>1.35)"},
+        }
+    }
+
+
+def get_nupl_history(days: int = 30) -> dict:
+    """NUPL 历史 — 主源 CoinMetrics, 备源 bitcoin-data"""
+    cm = _fetch_cm_history(days)
+    if cm and cm.get("dates"):
+        dates, values = _clean_nans(cm["dates"], cm["nupl"])
+    else:
+        dates, values = _fetch_bd_history("nupl", "nupl", days)
+    return {
+        "indicator": "NUPL", "dates": dates, "values": values,
+        "thresholds": {
+            "投降":   {"value": 0,    "color": "#ff4444", "label": "投降 (<0)"},
+            "希望":   {"value": 0.25, "color": "#ffcc00", "label": "希望/恐惧"},
+            "乐观":   {"value": 0.50, "color": "#f79322", "label": "乐观"},
+            "兴奋":   {"value": 0.75, "color": "#00d26a", "label": "兴奋 (>0.75)"},
+        }
+    }
+
+
+def get_puell_history(days: int = 30) -> dict:
+    """Puell Multiple 历史 — 主源 CoinMetrics, 备源 bitcoin-data"""
+    cm = _fetch_cm_history(days)
+    if cm and cm.get("dates"):
+        dates, values = _clean_nans(cm["dates"], cm["puell"])
+    else:
+        dates, values = _fetch_bd_history("puell-multiple", "puellMultiple", days)
+    return {
+        "indicator": "Puell Multiple", "dates": dates, "values": values,
+        "thresholds": {
+            "底部带": {"value": 0.5, "color": "#00d26a", "label": "底部带 (<0.5)"},
+            "正常":   {"value": 2.0, "color": "#ffcc00", "label": "正常"},
+            "顶部带": {"value": 4.0, "color": "#ff4444", "label": "顶部带 (>4)"},
+        }
+    }
+
+
 def get_indicator_history(indicator_name: str, df: pd.DataFrame = None, days: int = 30) -> dict:
     """统一的历史数据获取入口"""
     if indicator_name == "Ahr999" and df is not None:
@@ -793,6 +965,14 @@ def get_indicator_history(indicator_name: str, df: pd.DataFrame = None, days: in
         return get_company_holdings_history(df, days)
     elif indicator_name == "长期持有者(CDD)":
         return get_lth_cdd_history(days)
+    elif indicator_name == "MVRV-Z":
+        return get_mvrv_z_history(days)
+    elif indicator_name == "STH成本线" and df is not None:
+        return get_sth_cost_history(df, days)
+    elif indicator_name == "NUPL":
+        return get_nupl_history(days)
+    elif indicator_name == "Puell Multiple":
+        return get_puell_history(days)
     else:
         return {"indicator": indicator_name, "dates": [], "values": [], "thresholds": {}}
 

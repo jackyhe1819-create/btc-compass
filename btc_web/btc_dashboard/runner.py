@@ -46,6 +46,7 @@ from .history import (
     get_long_short_history, get_hashrate_history, get_mnav_history,
     get_etf_history, get_max_pain_history, get_company_holdings_history,
     get_lth_cdd_history,
+    get_mvrv_z_history, get_sth_cost_history, get_nupl_history, get_puell_history,
 )
 
 
@@ -321,6 +322,22 @@ def get_sparklines(df: pd.DataFrame, indicators: dict, days: int = 7) -> dict:
 
             elif name == "长期持有者(CDD)":
                 h = get_lth_cdd_history(days=days)
+                sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name == "MVRV-Z":
+                h = get_mvrv_z_history(days=days)
+                sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name == "STH成本线":
+                h = get_sth_cost_history(df, days=days)
+                sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name == "NUPL":
+                h = get_nupl_history(days=days)
+                sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+
+            elif name == "Puell Multiple":
+                h = get_puell_history(days=days)
                 sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
 
             else:
