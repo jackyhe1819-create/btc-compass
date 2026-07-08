@@ -114,6 +114,10 @@ class DashboardResult:
     tactical_recommendation: str = ""
     cycle_buckets: Optional[Dict] = None     # 周期分因子桶明细
     tactical_buckets: Optional[Dict] = None  # 战术分因子桶明细
+    data_source: str = ""                    # 价格数据来源 (Yahoo/CryptoCompare/...)
+    data_synthetic: bool = False             # True = 全部数据源失败, 用的演示数据, 评分无效
+    cycle_coverage: float = 1.0              # 周期分有效因子权重覆盖率 (0~1)
+    tactical_coverage: float = 1.0           # 战术分有效因子权重覆盖率 (0~1)
 
 
 # ============================================================
@@ -141,6 +145,7 @@ def fetch_btc_data(start_date: str = "2013-01-01", max_retries: int = 3) -> pd.D
                 raise ValueError("获取到空数据")
             
             btc.columns = ['price']
+            btc.attrs["source"] = "Yahoo Finance"
             print(f"✅ Yahoo Finance: 获取到 {len(btc)} 条数据，最新日期: {btc.index[-1].date()}")
             return btc
             
@@ -174,6 +179,7 @@ def fetch_btc_data(start_date: str = "2013-01-01", max_retries: int = 3) -> pd.D
                 df["price"] = df["close"].astype(float)
                 df = df[["price"]].dropna()
                 df = df[df["price"] > 0]
+                df.attrs["source"] = "CryptoCompare"
                 print(f"✅ CryptoCompare: 获取到 {len(df)} 条数据，最新日期: {df.index[-1].date()}")
                 return df
         else:
@@ -198,6 +204,7 @@ def fetch_btc_data(start_date: str = "2013-01-01", max_retries: int = 3) -> pd.D
                 df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
                 df.set_index("date", inplace=True)
                 df = df[["price"]]
+                df.attrs["source"] = "CoinGecko"
                 print(f"✅ CoinGecko: 获取到 {len(df)} 条数据，最新日期: {df.index[-1].date()}")
                 return df
         else:
@@ -222,6 +229,7 @@ def fetch_btc_data(start_date: str = "2013-01-01", max_retries: int = 3) -> pd.D
                 df.set_index("date", inplace=True)
                 df["price"] = df["close"].astype(float)
                 df = df[["price"]]
+                df.attrs["source"] = "Kraken"
                 print(f"✅ Kraken: 获取到 {len(df)} 条数据，最新日期: {df.index[-1].date()}")
                 return df
         else:
@@ -244,6 +252,7 @@ def fetch_btc_data(start_date: str = "2013-01-01", max_retries: int = 3) -> pd.D
             df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
             df.set_index("date", inplace=True)
             df = df[["price"]]
+            df.attrs["source"] = "Binance"
             print(f"✅ Binance: 获取到 {len(df)} 条数据，最新日期: {df.index[-1].date()}")
             return df
         else:
@@ -276,6 +285,10 @@ def generate_sample_data() -> pd.DataFrame:
     prices = prices * (95000 / prices[-1])
     
     df = pd.DataFrame({'price': prices}, index=dates)
+    # 显式标记合成数据 — 下游 (runner/app) 据此禁用评分展示与历史快照,
+    # 防止用随机噪声算出"看似正常"的仓位建议 (2026-07 对抗性审查修复)
+    df.attrs["source"] = "示例数据(合成)"
+    df.attrs["synthetic"] = True
     print(f"📊 生成了 {len(df)} 条示例数据")
     return df
 

@@ -107,19 +107,29 @@ PERCENTILE_WINDOW = 1460
 # 滚动分位数归一化
 # ============================================================
 
-def _percentile_score(series: pd.Series, window: int = PERCENTILE_WINDOW) -> float:
+def _percentile_score(series: pd.Series, window: int = PERCENTILE_WINDOW) -> Tuple[float, int]:
     """
     当前值在过去 window 天中的分位数 → 映射到 [-1, +1]。
     分位数越高（相对历史越贵）分数越低（看空）。
     映射: pct=0 → +1, pct=0.5 → 0, pct=1 → -1
+    返回 (score, 实际使用的窗口天数)。数据不足时 score=NaN。
+    实际窗口 < window 时（价格源降级到短历史备源），调用方必须如实标注,
+    不能继续宣称"4年分位" (2026-07 对抗性审查修复)。
     """
     s = series.dropna()
     if len(s) < window // 4:  # 至少一年数据
-        return float('nan')
+        return float('nan'), len(s)
     tail = s.tail(window)
     cur = tail.iloc[-1]
     pct = (tail < cur).mean()
-    return float((0.5 - pct) * 2)
+    return float((0.5 - pct) * 2), len(tail)
+
+
+def _percentile_note(pct: float, n_used: int, window: int = PERCENTILE_WINDOW) -> str:
+    """分位数展示文本: 满窗口标'4年分位', 短窗口如实标注实际天数。"""
+    if n_used >= window:
+        return f"4年分位 {pct:.0f}%"
+    return f"分位 {pct:.0f}% (⚠️窗口仅{n_used}天, 非4年)"
 
 
 def compute_percentile_overrides(df: pd.DataFrame) -> Dict[str, Tuple[float, str]]:
@@ -156,10 +166,10 @@ def compute_percentile_overrides(df: pd.DataFrame) -> Dict[str, Tuple[float, str
     metrics["Ahr999"] = (price / geo200) * pd.Series(price.values / fair, index=df.index)
 
     for name, series in metrics.items():
-        sc = _percentile_score(series)
+        sc, n_used = _percentile_score(series)
         if not np.isnan(sc):
             pct = (0.5 - sc / 2) * 100  # 反推分位数百分比, 用于展示
-            out[name] = (round(sc, 3), f"4年分位 {pct:.0f}%")
+            out[name] = (round(sc, 3), _percentile_note(pct, n_used))
     return out
 
 
@@ -191,12 +201,14 @@ def apply_percentile_overrides(indicators: Dict[str, IndicatorResult],
 # ============================================================
 
 def _compute_bucket_scores(buckets_cfg: dict,
-                           indicators: Dict[str, IndicatorResult]) -> Tuple[float, dict]:
+                           indicators: Dict[str, IndicatorResult]) -> Tuple[float, dict, float]:
     """
     按桶计算加权分。
     - 失败指标 (value=NaN) 直接剔除, 不作为中性票占权重
     - 桶内按 MEMBER_WEIGHTS 或等权, 桶间按配置权重, 缺桶时归一化
-    返回 (总分, 桶明细)
+    返回 (总分, 桶明细, 覆盖率)
+    覆盖率 = 有效桶的配置权重合计 (0~1)。剔除重归一虽合理, 但覆盖率过低时
+    评分由极少数因子决定, 纵向不可比 — 调用方应展示并警示。
     """
     total = 0.0
     weight_sum = 0.0
@@ -233,39 +245,50 @@ def _compute_bucket_scores(buckets_cfg: dict,
         }
 
     final = total / weight_sum if weight_sum > 0 else 0.0
-    return float(final), detail
+    return float(final), detail, float(weight_sum)
 
 
 def cycle_recommendation(score: float) -> str:
-    """周期分 → 仓位建议（斐波那契分档）"""
-    if score >= 0.618:
+    """
+    周期分 → 仓位建议。
+    阈值按 2014+ 回测评分分布的分位数标定 (2026-07 重标定):
+    桶平均机制把量程压缩到约 [-0.5, +0.68], 旧斐波那契阈值 (±0.618/±0.382)
+    的极值档 12 年只触发 <1% / 0 天, 档位形同虚设。
+    新阈值目标触发频率: 重仓~3% | 偏多~12% | 标准~30% | 中性~28% | 减配~17% | 低配~7% | 防守~3%。
+    """
+    if score >= 0.45:
         return "重仓区 · 建议仓位 80-100%"
-    elif score >= 0.382:
+    elif score >= 0.30:
         return "偏多配置 · 建议仓位 60-80%"
-    elif score >= 0.146:
+    elif score >= 0.15:
         return "标准配置 · 建议仓位 40-60%"
-    elif score >= -0.146:
+    elif score >= 0.00:
         return "中性观望 · 建议仓位 30-50%"
-    elif score >= -0.382:
+    elif score >= -0.12:
         return "减配 · 建议仓位 15-30%"
-    elif score >= -0.618:
+    elif score >= -0.30:
         return "低配 · 建议仓位 5-15%"
     else:
         return "防守区 · 建议仓位 0-5%"
 
 
 def tactical_recommendation(score: float) -> str:
-    """战术分 → 时机建议"""
-    if score >= 0.5:
+    """
+    战术分 → 时机建议。阈值按 2018+ 评分分布分位数标定 (2026-07 重标定,
+    旧 ±0.5/±0.2 下 79% 天数落在等待区、入场窗口 8 年仅 4 天)。
+    注意: 回测显示负分档的 30 天前瞻收益为正 (逆向过热信号在主升段提前触发),
+    负分只约束"别加杠杆追高", 不构成现货卖出信号 — 文案如实标注。
+    """
+    if score >= 0.25:
         return "入场窗口 · 杠杆出清+动量配合"
-    elif score >= 0.2:
+    elif score >= 0.10:
         return "逢低分批 · 条件偏有利"
-    elif score >= -0.2:
+    elif score >= -0.10:
         return "等待信号 · 无明显优势"
-    elif score >= -0.5:
-        return "谨慎 · 减少操作频率"
+    elif score >= -0.35:
+        return "谨慎 · 降低杠杆与操作频率"
     else:
-        return "高危时段 · 防追高/防爆仓"
+        return "杠杆拥挤 · 防追高防爆仓（非现货卖出信号）"
 
 
 def compute_dual_scores(indicators: Dict[str, IndicatorResult],
@@ -277,14 +300,24 @@ def compute_dual_scores(indicators: Dict[str, IndicatorResult],
     """
     apply_percentile_overrides(indicators, df)
 
-    cycle_score, cycle_detail = _compute_bucket_scores(CYCLE_BUCKETS, indicators)
-    tactical_score, tactical_detail = _compute_bucket_scores(TACTICAL_BUCKETS, indicators)
+    cycle_score, cycle_detail, cycle_cov = _compute_bucket_scores(CYCLE_BUCKETS, indicators)
+    tactical_score, tactical_detail, tactical_cov = _compute_bucket_scores(TACTICAL_BUCKETS, indicators)
+
+    cycle_rec = cycle_recommendation(cycle_score)
+    tactical_rec = tactical_recommendation(tactical_score)
+    # 覆盖率护栏: 有效因子权重过半缺失时, 评分由极少数因子决定, 必须警示
+    if cycle_cov < 0.5:
+        cycle_rec = f"⚠️ 数据覆盖仅{cycle_cov:.0%} · {cycle_rec} (可信度低)"
+    if tactical_cov < 0.5:
+        tactical_rec = f"⚠️ 数据覆盖仅{tactical_cov:.0%} · {tactical_rec} (可信度低)"
 
     return {
         "cycle_score": round(cycle_score, 3),
-        "cycle_recommendation": cycle_recommendation(cycle_score),
+        "cycle_recommendation": cycle_rec,
         "cycle_buckets": cycle_detail,
+        "cycle_coverage": round(cycle_cov, 3),
         "tactical_score": round(tactical_score, 3),
-        "tactical_recommendation": tactical_recommendation(tactical_score),
+        "tactical_recommendation": tactical_rec,
         "tactical_buckets": tactical_detail,
+        "tactical_coverage": round(tactical_cov, 3),
     }

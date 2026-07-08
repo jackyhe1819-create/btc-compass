@@ -72,19 +72,35 @@ async function fetchWithComputingPoll(url, opts) {
     }
 }
 
-// Threshold reference lines for key indicators
+// ── 主题感知调色板：Chart.js 画布无法用 CSS 变量，构建时经 PAL 解析当前主题色 ──
+function cssVar(name, fallback) {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+}
+const PAL = {
+    get up()     { return cssVar('--accent-green',  'var(--accent-green)'); },
+    get down()   { return cssVar('--accent-red',    'var(--accent-red)'); },
+    get mid()    { return cssVar('--accent-yellow', 'var(--accent-yellow)'); },
+    get btc()    { return cssVar('--accent-btc',    '#f7931a'); },
+    get blue()   { return cssVar('--accent-blue',   '#4488ff'); },
+    get purple() { return cssVar('--accent-purple', '#aa66ff'); },
+    get muted()  { return cssVar('--text-muted',    '#888888'); },
+    grid: 'rgba(128,128,128,0.15)'
+};
+
+// Threshold reference lines for key indicators (pal = PAL 调色板键)
 const INDICATOR_THRESHOLDS = {
     "Ahr999": [
-        { value: 0.45, label: "定投线", color: "#00ff88" },
-        { value: 1.2,  label: "顶部区", color: "#ff4466" }
+        { value: 0.45, label: "定投线", pal: "up" },
+        { value: 1.2,  label: "顶部区", pal: "down" }
     ],
     "Mayer Multiple": [
-        { value: 1.0, label: "均值",     color: "#ffcc00" },
-        { value: 2.4, label: "历史高位", color: "#ff4466" }
+        { value: 1.0, label: "均值",     pal: "mid" },
+        { value: 2.4, label: "历史高位", pal: "down" }
     ],
     "恐惧贪婪指数": [
-        { value: 20, label: "极度恐惧", color: "#00ff88" },
-        { value: 80, label: "极度贪婪", color: "#ff4466" }
+        { value: 20, label: "极度恐惧", pal: "up" },
+        { value: 80, label: "极度贪婪", pal: "down" }
     ]
 };
 
@@ -129,6 +145,12 @@ function applyTheme(theme) {
     if (typeof initTradingViewWidget === 'function') {
         initTradingViewWidget(theme === 'warm' ? 'light' : 'dark');
     }
+
+    // Chart.js 画布颜色在构建时解析，切换主题后重建评分历史与衍生品图表
+    if (window._compassBooted) {
+        if (typeof fetchScoreHistory === 'function') setTimeout(() => fetchScoreHistory(_scoreHistoryDays), 60);
+        if (typeof fetchDerivativesData === 'function') setTimeout(fetchDerivativesData, 60);
+    }
 }
 
 // 页面加载时获取数据
@@ -159,6 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => fetchScoreHistory(_scoreHistoryDays), REFRESH_INTERVAL);
     setTimeout(fetchDerivativesData, 2500);
     setInterval(fetchDerivativesData, 10 * 60 * 1000); // 每 10 分钟刷新
+    window._compassBooted = true;
 
     // 评分历史天数切换
     document.querySelectorAll('#scoreHistoryTabs .dtab').forEach(btn => {
@@ -197,7 +220,7 @@ async function fetchBuildersData() {
         if (refreshBtn) refreshBtn.classList.remove('spinning');
 
         if (!data.sources || data.sources.length === 0) {
-            grid.innerHTML = '<p style="color:#888;">暂无数据</p>';
+            grid.innerHTML = '<p style="color:var(--text-muted);">暂无数据</p>';
             return;
         }
 
@@ -213,7 +236,7 @@ async function fetchBuildersData() {
                         ${item.summary ? `<div class="builders-item-summary">${item.summary}</div>` : ''}
                         ${item.date ? `<div class="builders-item-date">${item.date}</div>` : ''}
                     </a>`).join('')
-                : `<p style="color:#666;font-size:0.82rem;padding:8px 0;">${src.error ? '加载失败' : '暂无内容'}</p>`;
+                : `<p style="color:var(--text-muted);font-size:0.82rem;padding:8px 0;">${src.error ? '加载失败' : '暂无内容'}</p>`;
 
             return `
                 <div class="builders-group">
@@ -250,7 +273,7 @@ function renderBuildersSummary(summary) {
     if (!body) return;
 
     if (!summary || summary.total_items === 0) {
-        body.innerHTML = '<p style="color:#888;font-size:0.85rem;">暂无摘要数据</p>';
+        body.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">暂无摘要数据</p>';
         if (meta) meta.textContent = '';
         return;
     }
@@ -441,25 +464,101 @@ function renderDashboard(data) {
 
     // 更新 DAT 动态卡片中的 mNAV
     renderDatMNAV(data.indicators['MSTR mNAV']);
+
+    // 渲染今日量化决策面板
+    renderDecisionPanel(data.decision);
+}
+
+/**
+ * 今日量化决策面板：长期仓位（滞回换档）+ 短期执行节奏 + 回测分档统计
+ */
+function renderDecisionPanel(d) {
+    const section = document.getElementById('decisionSection');
+    if (!section) return;
+    if (!d || !d.cycle) { section.style.display = 'none'; return; }
+    section.style.display = '';
+
+    const c = d.cycle, t = d.tactical;
+
+    // 动作 badge：加仓绿 / 减仓红 / 维持中性
+    const actionCls = { increase: 'up', decrease: 'down', hold: 'hold' }[c.action_type] || 'hold';
+    const actionIcon = { increase: '↑', decrease: '↓', hold: '—' }[c.action_type] || '—';
+
+    // 分档回测统计 chips（中位数 + 胜率）
+    const statChips = (stats, windows) => {
+        if (!stats) return '<span class="decision-stat-empty">回测统计不可用</span>';
+        return windows.filter(w => stats[w]).map(w => {
+            const s = stats[w];
+            const cls = s.median >= 0 ? 'pos' : 'neg';
+            return `<span class="decision-stat-chip ${cls}" title="样本 ${s.n} 天 · 均值 ${s.mean >= 0 ? '+' : ''}${s.mean}%">
+                ${w} 中位 ${s.median >= 0 ? '+' : ''}${s.median}% · 胜率 ${s.win}%</span>`;
+        }).join('');
+    };
+
+    // 滞回状态说明
+    let hystNote = '';
+    if (c.pending) {
+        hystNote = `<div class="decision-pending">⏳ ${c.pending.note}</div>`;
+    } else if (c.raw_differs) {
+        hystNote = `<div class="decision-pending muted">滞回防抖：评分档位「${c.raw_band}」未越过 ±0.05 边界，目标仓位不变</div>`;
+    }
+
+    document.getElementById('decisionCycle').innerHTML = `
+        <div class="decision-card-title">🧭 长期 · 仓位决策 <span class="decision-freq">周级变化</span></div>
+        <div class="decision-main">
+            <span class="decision-target">${c.target_lo}–${c.target_hi}<small>%</small></span>
+            <div class="decision-main-right">
+                <div class="decision-band">${c.band}</div>
+                <span class="decision-action ${actionCls}">${actionIcon} ${c.action}</span>
+            </div>
+        </div>
+        ${hystNote}
+        <div class="decision-stats">该档位 12 年回测前瞻：${statChips(c.stats, ['90d', '180d', '365d'])}</div>`;
+
+    document.getElementById('decisionTactical').innerHTML = `
+        <div class="decision-card-title">⚡ 短期 · 执行节奏 <span class="decision-freq">日级变化</span></div>
+        <div class="decision-main">
+            <span class="decision-pace">${t.pace}</span>
+            <div class="decision-main-right">
+                <div class="decision-band">${t.band}</div>
+            </div>
+        </div>
+        <div class="decision-advice">${t.advice}</div>
+        <div class="decision-stats">该档位回测前瞻：${statChips(t.stats, ['14d', '30d'])}</div>`;
+
+    // 警示 + 元信息
+    const warnEl = document.getElementById('decisionWarnings');
+    if (d.warnings && d.warnings.length) {
+        warnEl.style.display = '';
+        warnEl.innerHTML = d.warnings.map(w => `<div>⚠️ ${w}</div>`).join('');
+    } else {
+        warnEl.style.display = 'none';
+    }
+    const h = d.hysteresis || {};
+    document.getElementById('decisionMeta').textContent =
+        `滞回换档 δ=${h.delta} · ${h.confirm}天确认`;
+    document.getElementById('decisionFootnote').textContent =
+        (d.stats_meta && d.stats_meta.note ? d.stats_meta.note : '') +
+        '　·　短期节奏只影响执行快慢与杠杆约束，不改变目标仓位';
 }
 
 function renderDatMNAV(ind) {
     const el = document.getElementById('datMNAV');
     if (!el) return;
     if (!ind || ind.value === null) {
-        el.innerHTML = '<span style="color:#555;">MSTR mNAV 数据不可用</span>';
+        el.innerHTML = '<span style="color:var(--text-muted);">MSTR mNAV 数据不可用</span>';
         return;
     }
-    const colorMap = { '🟢': '#00ff88', '🟡': '#ffcc00', '🟠': '#ff9800', '🔴': '#ff4466', '⚪': '#888' };
-    const c = colorMap[ind.color] || '#888';
+    const colorMap = { '🟢': 'var(--accent-green)', '🟡': 'var(--accent-yellow)', '🟠': 'var(--accent-orange)', '🔴': 'var(--accent-red)', '⚪': 'var(--text-muted)' };
+    const c = colorMap[ind.color] || 'var(--text-muted)';
     el.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="color:#aaa;">MSTR mNAV</span>
+            <span style="color:var(--text-secondary);">MSTR mNAV</span>
             <span style="color:${c}; font-size:1.1rem; font-weight:700;">${ind.value.toFixed(2)}×</span>
         </div>
-        <div style="color:#666; font-size:0.72rem; margin-top:4px;">${ind.status}</div>
+        <div style="color:var(--text-muted); font-size:0.72rem; margin-top:4px;">${ind.status}</div>
         <a href="${ind.url}" target="_blank" rel="noopener noreferrer"
-           style="display:inline-block; margin-top:6px; font-size:0.7rem; color:#f7931a; opacity:0.7; text-decoration:none;">
+           style="display:inline-block; margin-top:6px; font-size:0.7rem; color:var(--accent-btc); opacity:0.7; text-decoration:none;">
             ↗ SaylorTracker 查看详情
         </a>`;
 }
@@ -510,7 +609,7 @@ function updateTopSummaryBar(data) {
         const val = indicators['Ahr999'].value;
         if (!isNaN(val)) {
             ahr999El.textContent = val.toFixed(2);
-            ahr999El.style.color = val < 0.45 ? '#00ff88' : (val < 1.2 ? '#ffcc00' : '#ff4466');
+            ahr999El.style.color = val < 0.45 ? 'var(--accent-green)' : (val < 1.2 ? 'var(--accent-yellow)' : 'var(--accent-red)');
         }
     }
 
@@ -520,12 +619,12 @@ function updateTopSummaryBar(data) {
         const val = indicators['恐惧贪婪指数'].value;
         if (!isNaN(val)) {
             fgEl.textContent = val.toFixed(0);
-            fgEl.style.color = val < 25 ? '#00ff88' : (val > 75 ? '#ff4466' : '#ffcc00');
+            fgEl.style.color = val < 25 ? 'var(--accent-green)' : (val > 75 ? 'var(--accent-red)' : 'var(--accent-yellow)');
         }
     }
 
     // 周期仓位分 / 短期战术分
-    const scoreColor = (s) => s >= 0.146 ? '#00ff88' : s <= -0.146 ? '#ff4466' : '#ffcc00';
+    const scoreColor = (s) => s >= 0.15 ? 'var(--accent-green)' : s <= -0.12 ? 'var(--accent-red)' : 'var(--accent-yellow)';
     const cycleEl = document.getElementById('summaryCycle');
     if (cycleEl && typeof data.total_score === 'number') {
         cycleEl.textContent = (data.total_score > 0 ? '+' : '') + data.total_score.toFixed(2);
@@ -711,7 +810,7 @@ function renderBucketBars(containerId, buckets) {
         const hasData = s !== null && s !== undefined;
         const pct = hasData ? Math.abs(s) * 50 : 0;          // 半宽最大 50%
         const left = hasData && s < 0 ? 50 - pct : 50;        // 负分向左, 正分向右
-        const color = !hasData ? '#555' : s >= 0.3 ? '#00ff88' : s <= -0.3 ? '#ff4466' : '#ffcc00';
+        const color = !hasData ? 'var(--text-muted)' : s >= 0.3 ? 'var(--accent-green)' : s <= -0.3 ? 'var(--accent-red)' : 'var(--accent-yellow)';
         const memberTip = (b.members || [])
             .map(m => `${m.name}: ${m.score === null ? '✕' : m.score}`)
             .join(' · ');
@@ -731,7 +830,7 @@ function renderBucketBars(containerId, buckets) {
 /**
  * Render an inline SVG sparkline from an array of values.
  */
-function renderSparkline(values, color) {
+function renderSparkline(values, colorKey) {
     if (!values || values.length < 2) {
         return '<svg class="card-v2-sparkline" viewBox="0 0 100 36"></svg>';
     }
@@ -746,9 +845,9 @@ function renderSparkline(values, color) {
     }).join(' ');
     const fillPts = `${pts} ${w},${h} 0,${h}`;
     return `
-        <svg class="card-v2-sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
-            <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
-            <polyline points="${fillPts}" fill="${color}18" stroke="none"/>
+        <svg class="card-v2-sparkline spark-${colorKey}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+            <polyline class="spark-line" points="${pts}"/>
+            <polyline class="spark-area" points="${fillPts}"/>
         </svg>`;
 }
 
@@ -803,9 +902,6 @@ function renderIndicators(indicators, sparklines) {
 function createIndicatorCardV2(indicator, sparklineValues) {
     const colorKey   = getColorClass(indicator.color);
     const badgeLabel = getBadgeLabel(indicator.color);
-    const colorHex   = colorKey === 'green' ? '#00ff88'
-                     : colorKey === 'red'   ? '#ff4466'
-                     : '#ffcc00';
 
     // Score bar width: map score (-1..+1) to 0..100%
     const scoreWidth = Math.round(((indicator.score + 1) / 2) * 100);
@@ -831,9 +927,9 @@ function createIndicatorCardV2(indicator, sparklineValues) {
         <div class="card-v2-value">${displayValue}</div>
         <div class="card-v2-status">${indicator.status || ''}</div>
         <div class="card-v2-score-bar">
-            <div class="card-v2-score-fill" style="width:${scoreWidth}%;background:${colorHex}"></div>
+            <div class="card-v2-score-fill fill-${colorKey}" style="width:${scoreWidth}%"></div>
         </div>
-        ${renderSparkline(sparklineValues, colorHex)}
+        ${renderSparkline(sparklineValues, colorKey)}
         <div class="card-v2-hint">点击展开历史图 →</div>
     `;
 
@@ -947,7 +1043,7 @@ function createIndicatorCard(indicator) {
         // 在名字旁添加链接图标
         const nameEl = card.querySelector('.indicator-name');
         if (nameEl) {
-            nameEl.innerHTML += ' <span style="font-size: 0.8em; color: #888;">↗</span>';
+            nameEl.innerHTML += ' <span style="font-size: 0.8em; color: var(--text-muted);">↗</span>';
         }
     }
 
@@ -1015,8 +1111,8 @@ function renderMiniChart(canvasId, data) {
             labels: labels,
             datasets: [{
                 data: data.values,
-                borderColor: '#f7931a',
-                backgroundColor: 'rgba(247, 147, 26, 0.1)',
+                borderColor: PAL.btc,
+                backgroundColor: PAL.btc + '1a',
                 borderWidth: 2,
                 fill: true,
                 tension: 0.3,
@@ -1042,7 +1138,7 @@ function renderMiniChart(canvasId, data) {
                 x: {
                     display: true,
                     ticks: {
-                        color: '#666',
+                        color: PAL.muted,
                         font: { size: 9 },
                         maxRotation: 0
                     },
@@ -1214,7 +1310,7 @@ function renderCryptoNews(news) {
     const container = document.getElementById('cryptoNews');
     if (!container) return;
 
-    const countBadge = `<div style="font-size:0.7rem; color:#555; padding:4px 4px 8px; border-bottom:1px solid rgba(255,255,255,0.06); margin-bottom:4px; flex-shrink:0;">
+    const countBadge = `<div style="font-size:0.7rem; color:var(--text-muted); padding:4px 4px 8px; border-bottom:1px solid var(--border-color); margin-bottom:4px; flex-shrink:0;">
         共 ${news.length} 条 · 最近 72 小时
     </div>`;
 
@@ -1389,19 +1485,19 @@ function renderWhaleActivity(whales) {
     // 根据交易类型返回颜色（按金额大小区分，而非买/卖方向）
     // 链上交易无法判断买/卖，仅展示转账金额
     function getWhaleColor(type) {
-        if (type.includes('巨鲸')) return '#ffd700';   // 金色 - 超巨额
-        if (type.includes('超大额')) return '#ff9800'; // 橙色 - 超大额
-        if (type.includes('大额')) return '#00e5ff';   // 青色 - 大额
-        if (type.includes('中额')) return '#90caf9';   // 浅蓝 - 中额
-        if (type.includes('⏳')) return '#ffc107';     // 黄色 - 待确认
-        return '#aaa';                                  // 灰色 - 普通
+        if (type.includes('巨鲸')) return 'var(--accent-btc)';      // 橙金 - 超巨额
+        if (type.includes('超大额')) return 'var(--accent-orange)';  // 橙色 - 超大额
+        if (type.includes('大额')) return 'var(--accent-blue)';      // 蓝色 - 大额
+        if (type.includes('中额')) return 'var(--text-secondary)';   // 次级灰 - 中额
+        if (type.includes('⏳')) return 'var(--accent-yellow)';      // 黄色 - 待确认
+        return 'var(--text-secondary)';                              // 灰色 - 普通
     }
 
     container.innerHTML = whales.map(item => {
         // 特殊处理 "链接" 类型
         if (item.type === '链接') {
             return `
-            <a href="${item.url}" target="_blank" class="whale-item" style="display: block; text-decoration: none; margin-bottom: 8px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 6px; font-size: 0.9rem; text-align: center; color: #f79322; font-weight: 500;">
+            <a href="${item.url}" target="_blank" class="whale-item" style="display: block; text-decoration: none; margin-bottom: 8px; padding: 10px; background: var(--bg-glass); border-radius: 6px; font-size: 0.9rem; text-align: center; color: var(--accent-btc); font-weight: 500;">
                 ${item.icon || '🔗'} ${item.amount || '查看更多'}
             </a>
             `;
@@ -1441,23 +1537,23 @@ function renderMacroCalendar(events) {
 
     // 影响程度颜色映射
     const impactColor = {
-        '高': '#ff4466',
-        '中': '#f79322',
-        '低': '#888'
+        '高': 'var(--accent-red)',
+        '中': 'var(--accent-btc)',
+        '低': 'var(--text-muted)'
     };
 
     container.innerHTML = events.map(item => {
         // 特殊处理 "链接" 类型
         if (item.type === '链接') {
             return `
-            <a href="${item.url}" target="_blank" class="calendar-item" style="display: block; text-decoration: none; margin-bottom: 10px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; text-align: center; color: #f79322;">
+            <a href="${item.url}" target="_blank" class="calendar-item" style="display: block; text-decoration: none; margin-bottom: 10px; padding: 10px; background: var(--bg-glass); border-radius: 8px; text-align: center; color: var(--accent-btc);">
                 ${item.event}
             </a>
             `;
         }
 
         const impact = item.impact || '';
-        const color = impactColor[impact] || '#888';
+        const color = impactColor[impact] || 'var(--text-muted)';
         const hasActual = item.has_actual;
         const isPast = item.is_past;
         const eventStatus = item.event_status || '';
@@ -1468,9 +1564,9 @@ function renderMacroCalendar(events) {
         // 状态徽章样式
         let statusBadge = '';
         if (eventStatus === '已公布') {
-            statusBadge = `<span style="font-size: 0.65rem; padding: 1px 5px; border-radius: 3px; background: ${hasActual ? '#00c85322' : 'rgba(128,128,128,0.15)'}; color: ${hasActual ? '#00c853' : 'var(--text-muted)'}; white-space: nowrap; margin-left: 6px; border: 1px solid ${hasActual ? '#00c85344' : 'rgba(128,128,128,0.2)'};">✓ 已公布</span>`;
+            statusBadge = `<span style="font-size: 0.65rem; padding: 1px 5px; border-radius: 3px; background: ${hasActual ? 'color-mix(in srgb, var(--accent-green) 14%, transparent)' : 'rgba(128,128,128,0.15)'}; color: ${hasActual ? 'var(--accent-green)' : 'var(--text-muted)'}; white-space: nowrap; margin-left: 6px; border: 1px solid ${hasActual ? 'color-mix(in srgb, var(--accent-green) 28%, transparent)' : 'rgba(128,128,128,0.2)'};">✓ 已公布</span>`;
         } else if (eventStatus === '待公布') {
-            statusBadge = `<span style="font-size: 0.65rem; padding: 1px 5px; border-radius: 3px; background: #f7932211; color: #f79322; white-space: nowrap; margin-left: 6px; border: 1px solid #f7932233;">⏳ 待公布</span>`;
+            statusBadge = `<span style="font-size: 0.65rem; padding: 1px 5px; border-radius: 3px; background: color-mix(in srgb, var(--accent-btc) 8%, transparent); color: var(--accent-btc); white-space: nowrap; margin-left: 6px; border: 1px solid color-mix(in srgb, var(--accent-btc) 22%, transparent);">⏳ 待公布</span>`;
         }
 
         // 构建数据值行
@@ -1478,7 +1574,7 @@ function renderMacroCalendar(events) {
         if (hasActual && actual) {
             // 有实际公布值 - 醒目显示
             dataRows += `<div style="margin-top: 5px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">`;
-            dataRows += `<span style="font-size: 0.82rem; color: #00e676; font-weight: 600; background: #00e67615; padding: 1px 6px; border-radius: 4px;">📌 公布: ${actual}</span>`;
+            dataRows += `<span style="font-size: 0.82rem; color: var(--accent-green); font-weight: 600; background: color-mix(in srgb, var(--accent-green) 10%, transparent); padding: 1px 6px; border-radius: 4px;">📌 公布: ${actual}</span>`;
             if (forecast) {
                 dataRows += `<span style="font-size: 0.75rem; color: var(--text-secondary);">预期: ${forecast}</span>`;
             }
@@ -1541,14 +1637,14 @@ function renderCryptoCalendar(events) {
 
     container.innerHTML = events.map(item => `
         <div class="calendar-item" style="margin-bottom: 10px; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 8px;">
-            <div style="color: #f79322; font-weight: 500;">
+            <div style="color: var(--accent-btc); font-weight: 500;">
                 ${item.icon || '📅'} ${item.event || item.title || '未知事件'}
-                ${item.source ? `<span style="font-size: 0.7rem; color: #666; margin-left: 8px;">[${item.source}]</span>` : ''}
+                ${item.source ? `<span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 8px;">[${item.source}]</span>` : ''}
             </div>
-            <div style="margin-top: 4px; font-size: 0.85rem; color: #aaa;">
+            <div style="margin-top: 4px; font-size: 0.85rem; color: var(--text-secondary);">
                 ${item.status || item.description || ''}
             </div>
-            <div style="margin-top: 4px; font-size: 0.75rem; color: #666;">
+            <div style="margin-top: 4px; font-size: 0.75rem; color: var(--text-muted);">
                 ${item.date || ''} ${item.type ? '· ' + item.type : ''} ${item.impact ? '· 影响: ' + item.impact : ''}
             </div>
         </div>
@@ -1633,14 +1729,14 @@ function renderDrawerChart(data, indicatorName) {
             type: 'line',
             yMin: t.value,
             yMax: t.value,
-            borderColor: t.color,
+            borderColor: PAL[t.pal],
             borderWidth: 1,
             borderDash: [4, 3],
             label: {
                 content: t.label,
                 display: true,
                 position: 'start',
-                color: t.color,
+                color: PAL[t.pal],
                 font: { size: 10 }
             }
         };
@@ -1652,11 +1748,11 @@ function renderDrawerChart(data, indicatorName) {
             labels: data.dates,
             datasets: [{
                 data: data.values,
-                borderColor: '#f7931a',
+                borderColor: PAL.btc,
                 borderWidth: 1.5,
                 pointRadius: 0,
                 fill: true,
-                backgroundColor: '#f7931a18',
+                backgroundColor: PAL.btc + '18',
                 tension: 0.3
             }]
         },
@@ -1669,12 +1765,12 @@ function renderDrawerChart(data, indicatorName) {
             },
             scales: {
                 x: {
-                    ticks: { color: '#666', maxTicksLimit: 8, font: { size: 10 } },
-                    grid: { color: '#1e2535' }
+                    ticks: { color: PAL.muted, maxTicksLimit: 8, font: { size: 10 } },
+                    grid: { color: PAL.grid }
                 },
                 y: {
-                    ticks: { color: '#666', font: { size: 10 } },
-                    grid: { color: '#1e2535' }
+                    ticks: { color: PAL.muted, font: { size: 10 } },
+                    grid: { color: PAL.grid }
                 }
             }
         }
@@ -1752,8 +1848,8 @@ function renderScoreHistoryChart(series) {
                 {
                     label: '周期分',
                     data: scores,
-                    borderColor: '#f7931a',
-                    backgroundColor: '#f7931a18',
+                    borderColor: PAL.btc,
+                    backgroundColor: PAL.btc + '18',
                     borderWidth: 2,
                     pointRadius: series.length > 60 ? 0 : 2,
                     fill: true,
@@ -1763,7 +1859,7 @@ function renderScoreHistoryChart(series) {
                 ...(hasTactical ? [{
                     label: '战术分',
                     data: tacticals,
-                    borderColor: '#aa66ff',
+                    borderColor: PAL.purple,
                     borderWidth: 1.5,
                     pointRadius: 0,
                     fill: false,
@@ -1773,7 +1869,7 @@ function renderScoreHistoryChart(series) {
                 {
                     label: 'BTC 价格',
                     data: prices,
-                    borderColor: '#4488ff',
+                    borderColor: PAL.blue,
                     borderWidth: 1.5,
                     borderDash: [4, 3],
                     pointRadius: 0,
@@ -1790,7 +1886,7 @@ function renderScoreHistoryChart(series) {
             plugins: {
                 legend: {
                     display: true,
-                    labels: { color: '#888', font: { size: 10 }, boxWidth: 16 }
+                    labels: { color: PAL.muted, font: { size: 10 }, boxWidth: 16 }
                 },
                 tooltip: {
                     callbacks: {
@@ -1804,36 +1900,36 @@ function renderScoreHistoryChart(series) {
                     annotations: {
                         zero: {
                             type: 'line', yMin: 0, yMax: 0, yScaleID: 'yScore',
-                            borderColor: '#888', borderWidth: 1, borderDash: [2, 4]
+                            borderColor: PAL.muted, borderWidth: 1, borderDash: [2, 4]
                         },
                         buy: {
-                            type: 'line', yMin: 0.382, yMax: 0.382, yScaleID: 'yScore',
-                            borderColor: '#00ff8866', borderWidth: 1, borderDash: [4, 4],
-                            label: { content: '买入 0.382', display: true, position: 'start', color: '#00ff88', font: { size: 9 }, backgroundColor: 'transparent' }
+                            type: 'line', yMin: 0.30, yMax: 0.30, yScaleID: 'yScore',
+                            borderColor: PAL.up + '66', borderWidth: 1, borderDash: [4, 4],
+                            label: { content: '偏多 +0.30', display: true, position: 'start', color: PAL.up, font: { size: 9 }, backgroundColor: 'transparent' }
                         },
                         reduce: {
-                            type: 'line', yMin: -0.382, yMax: -0.382, yScaleID: 'yScore',
-                            borderColor: '#ff446666', borderWidth: 1, borderDash: [4, 4],
-                            label: { content: '卖出 -0.382', display: true, position: 'start', color: '#ff4466', font: { size: 9 }, backgroundColor: 'transparent' }
+                            type: 'line', yMin: -0.12, yMax: -0.12, yScaleID: 'yScore',
+                            borderColor: PAL.down + '66', borderWidth: 1, borderDash: [4, 4],
+                            label: { content: '减配 -0.12', display: true, position: 'start', color: PAL.down, font: { size: 9 }, backgroundColor: 'transparent' }
                         }
                     }
                 }
             },
             scales: {
                 x: {
-                    ticks: { color: '#666', maxTicksLimit: 10, font: { size: 10 } },
+                    ticks: { color: PAL.muted, maxTicksLimit: 10, font: { size: 10 } },
                     grid: { display: false }
                 },
                 yScore: {
                     position: 'left',
                     min: -1, max: 1,
-                    ticks: { color: '#f7931a', font: { size: 10 } },
+                    ticks: { color: PAL.btc, font: { size: 10 } },
                     grid: { color: 'rgba(128,128,128,0.12)' }
                 },
                 yPrice: {
                     position: 'right',
                     ticks: {
-                        color: '#4488ff', font: { size: 10 },
+                        color: PAL.blue, font: { size: 10 },
                         callback: (v) => '$' + (v >= 1000 ? (v / 1000).toFixed(0) + 'K' : v)
                     },
                     grid: { display: false }
@@ -1849,7 +1945,7 @@ function renderSignalChanges(changes) {
     if (!container) return;
 
     if (!changes || !changes.prev_date) {
-        container.innerHTML = '<p style="color:#888; font-size:0.85rem;">📭 暂无对比基准，明天起自动显示与前一日的信号变化</p>';
+        container.innerHTML = '<p style="color:var(--text-muted); font-size:0.85rem;">📭 暂无对比基准，明天起自动显示与前一日的信号变化</p>';
         if (meta) meta.textContent = '';
         return;
     }
@@ -1862,7 +1958,7 @@ function renderSignalChanges(changes) {
     const t = changes.total;
     if (t) {
         const deltaCls = t.delta > 0 ? 'positive' : t.delta < 0 ? 'negative' : 'neutral';
-        const deltaColor = t.delta > 0 ? '#00ff88' : t.delta < 0 ? '#ff4466' : '#888';
+        const deltaColor = t.delta > 0 ? 'var(--accent-green)' : t.delta < 0 ? 'var(--accent-red)' : 'var(--text-muted)';
         const arrow = t.delta > 0 ? '▲' : t.delta < 0 ? '▼' : '—';
         html += `
             <div class="signal-change-item total ${t.band_changed ? 'band-changed' : ''}">
@@ -1873,7 +1969,7 @@ function renderSignalChanges(changes) {
                     </span>
                 </div>
                 ${t.band_changed
-                    ? `<div style="margin-top:4px; font-size:0.8rem; color:#f7931a;">⚡ 档位变化: ${t.prev_band} → <b>${t.curr_band}</b></div>`
+                    ? `<div style="margin-top:4px; font-size:0.8rem; color:var(--accent-btc);">⚡ 档位变化: ${t.prev_band} → <b>${t.curr_band}</b></div>`
                     : `<div style="margin-top:4px; font-size:0.78rem; color:var(--text-muted);">档位维持「${t.curr_band}」</div>`}
             </div>`;
     }
@@ -1881,11 +1977,11 @@ function renderSignalChanges(changes) {
     // 指标跨档变化
     const inds = changes.indicators || [];
     if (inds.length === 0) {
-        html += '<p style="color:#888; font-size:0.82rem; margin-top:8px;">✅ 各指标信号与前一日一致，无跨档变化</p>';
+        html += '<p style="color:var(--text-muted); font-size:0.82rem; margin-top:8px;">✅ 各指标信号与前一日一致，无跨档变化</p>';
     } else {
         html += inds.map(c => {
             const isBull = c.direction === 'bullish';
-            const color = isBull ? '#00ff88' : '#ff4466';
+            const color = isBull ? 'var(--accent-green)' : 'var(--accent-red)';
             const icon = isBull ? '🟢' : '🔴';
             const dirText = isBull ? '转多' : '转空';
             return `
@@ -1928,9 +2024,9 @@ function _fmtUsdB(v) {
 }
 
 function _pctSpan(v, inverse) {
-    if (v === null || v === undefined) return '<span style="color:#888;">--</span>';
+    if (v === null || v === undefined) return '<span style="color:var(--text-muted);">--</span>';
     const positive = inverse ? v < 0 : v > 0;
-    const color = v === 0 ? '#888' : positive ? '#00ff88' : '#ff4466';
+    const color = v === 0 ? 'var(--text-muted)' : positive ? 'var(--accent-green)' : 'var(--accent-red)';
     const sign = v > 0 ? '+' : '';
     return `<span style="color:${color}; font-weight:600;">${sign}${v.toFixed(2)}%</span>`;
 }
@@ -1944,10 +2040,10 @@ function renderDerivatives(data) {
 
     const regime = data.regime || {};
     const toneColors = {
-        bullish: '#00ff88', bearish: '#ff4466',
-        warning: '#ff9800', neutral: '#888'
+        bullish: 'var(--accent-green)', bearish: 'var(--accent-red)',
+        warning: 'var(--accent-orange)', neutral: 'var(--text-muted)'
     };
-    const rColor = toneColors[regime.tone] || '#888';
+    const rColor = toneColors[regime.tone] || 'var(--text-muted)';
 
     // ── 顶部：行情性质徽章 ──
     const regimeHtml = `
@@ -1977,7 +2073,7 @@ function renderDerivatives(data) {
             </div>`);
     }
     if (fd) {
-        const frColor = fd.rate_pct > 0.03 ? '#ff9800' : fd.rate_pct < -0.03 ? '#00ff88' : '#888';
+        const frColor = fd.rate_pct > 0.03 ? 'var(--accent-orange)' : fd.rate_pct < -0.03 ? 'var(--accent-green)' : 'var(--text-muted)';
         cards.push(`
             <div class="deriv-stat">
                 <span class="deriv-stat-label">资金费率 (8h)</span>
@@ -1986,7 +2082,7 @@ function renderDerivatives(data) {
             </div>`);
     }
     if (ls) {
-        const lsColor = ls.ratio > 1.5 ? '#ff9800' : ls.ratio < 0.7 ? '#00ff88' : '#888';
+        const lsColor = ls.ratio > 1.5 ? 'var(--accent-orange)' : ls.ratio < 0.7 ? 'var(--accent-green)' : 'var(--text-muted)';
         cards.push(`
             <div class="deriv-stat">
                 <span class="deriv-stat-label">多空账户比</span>
@@ -2001,8 +2097,8 @@ function renderDerivatives(data) {
                 <span class="deriv-stat-label">清算样本</span>
                 <span class="deriv-stat-value" style="color:var(--text-primary);">${_fmtUsdB(liq.total_usd)}</span>
                 <span class="deriv-stat-sub">
-                    <span style="color:#ff4466;">多单 ${longShare.toFixed(0)}%</span> /
-                    <span style="color:#00ff88;">空单 ${(100 - longShare).toFixed(0)}%</span>
+                    <span style="color:var(--accent-red);">多单 ${longShare.toFixed(0)}%</span> /
+                    <span style="color:var(--accent-green);">空单 ${(100 - longShare).toFixed(0)}%</span>
                 </span>
             </div>`);
     }
@@ -2034,8 +2130,8 @@ function renderDerivatives(data) {
                         {
                             label: 'OI (USD)',
                             data: oi.history.map(h => h.oi_usd),
-                            borderColor: '#f7931a',
-                            backgroundColor: '#f7931a15',
+                            borderColor: PAL.btc,
+                            backgroundColor: PAL.btc + '15',
                             borderWidth: 2,
                             pointRadius: 0,
                             fill: true,
@@ -2045,7 +2141,7 @@ function renderDerivatives(data) {
                         {
                             label: 'BTC 价格',
                             data: oi.history.map(h => h.price),
-                            borderColor: '#4488ff',
+                            borderColor: PAL.blue,
                             borderWidth: 1.5,
                             borderDash: [4, 3],
                             pointRadius: 0,
@@ -2061,7 +2157,7 @@ function renderDerivatives(data) {
                     maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
-                        legend: { display: true, labels: { color: '#888', font: { size: 10 }, boxWidth: 16 } },
+                        legend: { display: true, labels: { color: PAL.muted, font: { size: 10 }, boxWidth: 16 } },
                         tooltip: {
                             callbacks: {
                                 label: (item) => item.dataset.yAxisID === 'yOi'
@@ -2071,15 +2167,15 @@ function renderDerivatives(data) {
                         }
                     },
                     scales: {
-                        x: { ticks: { color: '#666', maxTicksLimit: 10, font: { size: 10 } }, grid: { display: false } },
+                        x: { ticks: { color: PAL.muted, maxTicksLimit: 10, font: { size: 10 } }, grid: { display: false } },
                         yOi: {
                             position: 'left',
-                            ticks: { color: '#f7931a', font: { size: 10 }, callback: (v) => '$' + (v / 1e9).toFixed(0) + 'B' },
+                            ticks: { color: PAL.btc, font: { size: 10 }, callback: (v) => '$' + (v / 1e9).toFixed(0) + 'B' },
                             grid: { color: 'rgba(128,128,128,0.12)' }
                         },
                         yPx: {
                             position: 'right',
-                            ticks: { color: '#4488ff', font: { size: 10 }, callback: (v) => '$' + (v / 1000).toFixed(0) + 'K' },
+                            ticks: { color: PAL.blue, font: { size: 10 }, callback: (v) => '$' + (v / 1000).toFixed(0) + 'K' },
                             grid: { display: false }
                         }
                     }
@@ -2105,8 +2201,8 @@ function renderEtfFlow(etf) {
     const series = etf.series;
     const maxAbs = Math.max(...series.map(s => Math.abs(s.total)), 1);
     const latest = etf.latest || {};
-    const latestColor = (latest.total || 0) >= 0 ? '#00ff88' : '#ff4466';
-    const sum5Color = (etf.sum_5d || 0) >= 0 ? '#00ff88' : '#ff4466';
+    const latestColor = (latest.total || 0) >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+    const sum5Color = (etf.sum_5d || 0) >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
 
     const fmtM = (v) => {
         if (v === null || v === undefined) return '--';
@@ -2118,7 +2214,7 @@ function renderEtfFlow(etf) {
     const barsHtml = series.map(s => {
         const positive = s.total >= 0;
         const hPct = Math.min(100, Math.abs(s.total) / maxAbs * 100);
-        const color = positive ? '#00ff88' : '#ff4466';
+        const color = positive ? 'var(--accent-green)' : 'var(--accent-red)';
         const fundsTip = Object.entries(s.funds || {})
             .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
             .slice(0, 5)
@@ -2144,7 +2240,7 @@ function renderEtfFlow(etf) {
             </div>
             <div class="etf-flow-stat">
                 <span class="etf-flow-label">${series.length}日累计</span>
-                <span class="etf-flow-value" style="color:${(etf.sum_total || 0) >= 0 ? '#00ff88' : '#ff4466'};">${fmtM(etf.sum_total)}</span>
+                <span class="etf-flow-value" style="color:${(etf.sum_total || 0) >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'};">${fmtM(etf.sum_total)}</span>
             </div>
             ${etf.cum_total ? `
             <div class="etf-flow-stat">
@@ -2172,11 +2268,11 @@ function renderDatHoldings(data) {
         return;
     }
 
-    const hdr = (txt, align) => `<span style="color: #555; font-size: 0.7rem; padding-bottom: 4px; border-bottom: 1px solid #2a3040;${align ? ' text-align: right;' : ''}">${txt}</span>`;
+    const hdr = (txt, align) => `<span style="color: var(--text-muted); font-size: 0.7rem; padding-bottom: 4px; border-bottom: 1px solid var(--border-color);${align ? ' text-align: right;' : ''}">${txt}</span>`;
     const rows = data.companies.map(c => `
         <span title="${c.pct_supply ? `占总供应量 ${c.pct_supply}%` : ''}">${c.name}</span>
-        <span style="text-align:right; color:#f7931a;">${c.holdings.toLocaleString()}</span>
-        <span style="text-align:right; color:#555;">${c.symbol}</span>
+        <span style="text-align:right; color:var(--accent-btc);">${c.holdings.toLocaleString()}</span>
+        <span style="text-align:right; color:var(--text-muted);">${c.symbol}</span>
     `).join('');
 
     panel.innerHTML = `
@@ -2184,7 +2280,7 @@ function renderDatHoldings(data) {
             ${hdr('公司')}${hdr('持仓 (BTC)', true)}${hdr('代码', true)}
             ${rows}
         </div>
-        <p style="margin: 10px 0 0; color: #444; font-size: 0.68rem; text-align: right;">
+        <p style="margin: 10px 0 0; color: var(--text-muted); font-size: 0.68rem; text-align: right;">
             上市公司合计 ${data.total.toLocaleString()} BTC · CoinGecko · ${data.updated_at}
         </p>
     `;

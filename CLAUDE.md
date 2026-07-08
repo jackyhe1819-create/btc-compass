@@ -15,6 +15,7 @@
 | `btc_web/btc_dashboard/scoring.py` | 双评分引擎：因子分桶 + 滚动 4 年分位数归一化 |
 | `btc_web/btc_dashboard/indicators_v2.py` | 新增因子（MVRV-Z、STH成本线、NUPL、SOPR、Puell、Hash Ribbons、稳定币增速、期货基差、趋势过滤器等），含链上慢变量 6h 缓存 |
 | `btc_web/btc_dashboard/backfill.py` | 评分历史 90 天回填（幂等，app 启动线程自动执行） |
+| `btc_web/btc_dashboard/decision.py` | 量化决策引擎：周期分→目标仓位（滞回换档 δ=0.05/5天确认，防边界抖动）+ 战术分→执行节奏；分档回测统计读 `data/band_stats.json`（由 backtest 生成，改档位阈值后须重跑回测同步） |
 
 ## 注意事项
 

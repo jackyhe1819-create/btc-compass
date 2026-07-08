@@ -15,11 +15,33 @@ from typing import Tuple, Dict, Optional
 from .core import IndicatorResult
 
 
+def fetch_okx_kline(bar: str, limit: int = 100) -> Optional[pd.Series]:
+    """OKX 真实K线收盘价序列 (升序)。RSI/MACD 共用。失败返回 None。"""
+    try:
+        response = requests.get(
+            "https://www.okx.com/api/v5/market/candles",
+            params={"instId": "BTC-USDT", "bar": bar, "limit": limit},
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+            timeout=10
+        )
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == "0" and data.get("data"):
+                closes = [float(item[4]) for item in reversed(data["data"])]
+                return pd.Series(closes)
+    except Exception as e:
+        print(f"⚠️ OKX {bar} K线获取失败: {e}")
+    return None
+
+
 def calc_rsi(df: pd.DataFrame, period: int = 14) -> IndicatorResult:
     """
-    RSI 多周期汇总 (4H, 12H, 日, 周, 月, 年)
-    - 计算各周期 RSI 信号
-    - 汇总超买/超卖/中性信号数量
+    RSI 多周期汇总 (4H, 12H, 日, 周, 月)
+    - 4H/12H: OKX 真实K线 (与 MACD 同源)；获取失败则跳过该周期，
+      不再用日线序列切片伪装 (旧实现三个周期数值完全相同, 日线被三重计票)
+    - 周线/月线: 日线重采样
+    - 年线已移除: 年K不足15根无统计意义, 且 BTC 长期上行使年线 RSI 常年超买,
+      会给战术分注入一张永久看空票 (2026-07 对抗性审查修复)
     """
     df = df.copy()
     
@@ -70,99 +92,49 @@ def calc_rsi(df: pd.DataFrame, period: int = 14) -> IndicatorResult:
     oversold_count = 0
     neutral_count = 0
     total_score = 0
-    
+
+    def add_result(tf_name, result):
+        nonlocal overbought_count, oversold_count, neutral_count, total_score
+        if result:
+            results[tf_name] = result
+            if result["trend"] == "超买":
+                overbought_count += 1
+            elif result["trend"] == "超卖":
+                oversold_count += 1
+            else:
+                neutral_count += 1
+            total_score += result["score"]
+
+    # 4H / 12H - OKX 真实K线（获取失败则跳过，不用日线伪装）
+    kline_4h = fetch_okx_kline("4H", 100)
+    if kline_4h is not None:
+        add_result("4H", calculate_single_rsi(kline_4h, period))
+
+    kline_12h = fetch_okx_kline("12Hutc", 100)
+    if kline_12h is not None:
+        add_result("12H", calculate_single_rsi(kline_12h, period))
+
     # 日线 RSI (基准)
-    daily_result = calculate_single_rsi(df['price'], period)
-    if daily_result:
-        results["日线"] = daily_result
-        if daily_result["trend"] == "超买":
-            overbought_count += 1
-        elif daily_result["trend"] == "超卖":
-            oversold_count += 1
-        else:
-            neutral_count += 1
-        total_score += daily_result["score"]
-    
-    # 4H - 使用更密集的数据点
-    if len(df) >= 70:
-        short_df = df.tail(len(df) // 6 * 6)
-        result_4h = calculate_single_rsi(short_df['price'], period)
-        if result_4h:
-            results["4H"] = result_4h
-            if result_4h["trend"] == "超买":
-                overbought_count += 1
-            elif result_4h["trend"] == "超卖":
-                oversold_count += 1
-            else:
-                neutral_count += 1
-            total_score += result_4h["score"]
-    
-    # 12H
-    if len(df) >= 70:
-        half_df = df.tail(len(df) // 2)
-        result_12h = calculate_single_rsi(half_df['price'], period)
-        if result_12h:
-            results["12H"] = result_12h
-            if result_12h["trend"] == "超买":
-                overbought_count += 1
-            elif result_12h["trend"] == "超卖":
-                oversold_count += 1
-            else:
-                neutral_count += 1
-            total_score += result_12h["score"]
-    
+    add_result("日线", calculate_single_rsi(df['price'], period))
+
     # 周线重采样
     try:
         df_indexed = df.set_index('date') if 'date' in df.columns else df
         weekly_prices = df_indexed['price'].resample('W').last().dropna()
         if len(weekly_prices) >= period + 1:
-            result_weekly = calculate_single_rsi(weekly_prices, period)
-            if result_weekly:
-                results["周线"] = result_weekly
-                if result_weekly["trend"] == "超买":
-                    overbought_count += 1
-                elif result_weekly["trend"] == "超卖":
-                    oversold_count += 1
-                else:
-                    neutral_count += 1
-                total_score += result_weekly["score"]
+            add_result("周线", calculate_single_rsi(weekly_prices, period))
     except Exception:
         pass
-    
+
     # 月线重采样
     try:
+        df_indexed = df.set_index('date') if 'date' in df.columns else df
         monthly_prices = df_indexed['price'].resample('ME').last().dropna()
         if len(monthly_prices) >= period + 1:
-            result_monthly = calculate_single_rsi(monthly_prices, period)
-            if result_monthly:
-                results["月线"] = result_monthly
-                if result_monthly["trend"] == "超买":
-                    overbought_count += 1
-                elif result_monthly["trend"] == "超卖":
-                    oversold_count += 1
-                else:
-                    neutral_count += 1
-                total_score += result_monthly["score"]
+            add_result("月线", calculate_single_rsi(monthly_prices, period))
     except Exception:
         pass
-    
-    # 年线重采样
-    try:
-        yearly_prices = df_indexed['price'].resample('YE').last().dropna()
-        if len(yearly_prices) >= 5:
-            result_yearly = calculate_single_rsi(yearly_prices, min(period, len(yearly_prices)-1))
-            if result_yearly:
-                results["年线"] = result_yearly
-                if result_yearly["trend"] == "超买":
-                    overbought_count += 1
-                elif result_yearly["trend"] == "超卖":
-                    oversold_count += 1
-                else:
-                    neutral_count += 1
-                total_score += result_yearly["score"]
-    except Exception:
-        pass
-    
+
     # 生成汇总状态
     total_timeframes = len(results)
     
@@ -219,7 +191,7 @@ def calc_rsi(df: pd.DataFrame, period: int = 14) -> IndicatorResult:
         priority="短期",
         url="https://www.tradingview.com/chart/?symbol=BINANCE:BTCUSDT",
         description="相对强弱指数 (RSI) 衡量价格变动的速度和幅度，以评估资产是否超买或超卖。",
-        method="RSI通过计算一段时间内上涨和下跌的平均幅度来生成0到100之间的值。高于70通常视为超买，低于30视为超卖。"
+        method="多周期投票: 4H/12H 用 OKX 真实K线, 日线用价格序列, 周/月线由日线重采样。各周期 RSI≥70 记超买票、≤30 记超卖票, 按多数方向与占比汇总评分。注: 平滑用简单均值 (Cutler 法), 数值与 TradingView 的 Wilder 版会有小幅差异。"
     )
 
 
@@ -276,24 +248,6 @@ def calc_macd(df: pd.DataFrame) -> IndicatorResult:
                 return {"signal": "空头增强", "trend": "空", "strength": 1}
             else:
                 return {"signal": "空头减弱", "trend": "空", "strength": 0.5}
-    
-    def fetch_okx_kline(bar, limit=100):
-        """从 OKX 获取真实K线数据"""
-        try:
-            response = requests.get(
-                "https://www.okx.com/api/v5/market/candles",
-                params={"instId": "BTC-USDT", "bar": bar, "limit": limit},
-                headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
-                timeout=10
-            )
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("code") == "0" and data.get("data"):
-                    closes = [float(item[4]) for item in reversed(data["data"])]
-                    return pd.Series(closes)
-        except Exception as e:
-            print(f"⚠️ OKX {bar} K线获取失败: {e}")
-        return None
     
     results = {}
     bullish_count = 0

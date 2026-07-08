@@ -12,24 +12,24 @@ backtest.evaluate
 import numpy as np
 import pandas as pd
 
-# 周期分档位 (scoring.cycle_recommendation 阈值) → 档位中值仓位
+# 周期分档位 (scoring.cycle_recommendation 阈值, 2026-07 按评分分布分位数重标定) → 档位中值仓位
 CYCLE_BANDS = [
-    (0.618, float("inf"), "重仓区 80-100%", 0.90),
-    (0.382, 0.618, "偏多配置 60-80%", 0.70),
-    (0.146, 0.382, "标准配置 40-60%", 0.50),
-    (-0.146, 0.146, "中性观望 30-50%", 0.40),
-    (-0.382, -0.146, "减配 15-30%", 0.225),
-    (-0.618, -0.382, "低配 5-15%", 0.10),
-    (float("-inf"), -0.618, "防守区 0-5%", 0.025),
+    (0.45, float("inf"), "重仓区 80-100%", 0.90),
+    (0.30, 0.45, "偏多配置 60-80%", 0.70),
+    (0.15, 0.30, "标准配置 40-60%", 0.50),
+    (0.00, 0.15, "中性观望 30-50%", 0.40),
+    (-0.12, 0.00, "减配 15-30%", 0.225),
+    (-0.30, -0.12, "低配 5-15%", 0.10),
+    (float("-inf"), -0.30, "防守区 0-5%", 0.025),
 ]
 
-# 战术分档位 (scoring.tactical_recommendation 阈值)
+# 战术分档位 (scoring.tactical_recommendation 阈值, 2026-07 重标定)
 TACTICAL_BANDS = [
-    (0.5, float("inf"), "入场窗口 (≥0.5)"),
-    (0.2, 0.5, "逢低分批 (0.2~0.5)"),
-    (-0.2, 0.2, "等待信号 (-0.2~0.2)"),
-    (-0.5, -0.2, "谨慎 (-0.5~-0.2)"),
-    (float("-inf"), -0.5, "高危时段 (<-0.5)"),
+    (0.25, float("inf"), "入场窗口 (≥0.25)"),
+    (0.10, 0.25, "逢低分批 (0.1~0.25)"),
+    (-0.10, 0.10, "等待信号 (-0.1~0.1)"),
+    (-0.35, -0.10, "谨慎 (-0.35~-0.1)"),
+    (float("-inf"), -0.35, "杠杆拥挤 (<-0.35)"),
 ]
 
 
@@ -130,6 +130,67 @@ def run_cycle_strategy(score: pd.Series, price: pd.Series) -> dict:
     avg_pos = float(pos.mean())
     return {"equity": eq, "metrics": metrics, "turnover": turnover,
             "avg_pos": avg_pos, "position": pos}
+
+
+def hysteresis_band_indices(score: pd.Series, delta: float = 0.05,
+                            confirm: int = 5) -> pd.Series:
+    """
+    决策层滞回换档: 分数须越过当前档位边界 ±delta 且新档位连续 confirm 天
+    保持, 才切换生效档。消除边界附近的日频往返换档 (基线 12 年换档 787 次)。
+    参数取自 δ∈[0.03,0.06]×N∈[3,7] 网格的平台中部 (非单点最优, 防过拟合)。
+    返回逐日生效档位索引 (CYCLE_BANDS 下标)。
+    """
+    def _idx(s):
+        for i, (lo, hi, _, _) in enumerate(CYCLE_BANDS):
+            if lo <= s < hi or (hi == float("inf") and s >= lo):
+                return i
+        return 3
+
+    vals = score.values
+    out = np.empty(len(vals), dtype=int)
+    cur = _idx(vals[0])
+    pending, pend_days = cur, 0
+    for i, s in enumerate(vals):
+        lo, hi, _, _ = CYCLE_BANDS[cur]
+        lo_x = lo - delta if lo != float("-inf") else lo
+        hi_x = hi + delta if hi != float("inf") else hi
+        cand = _idx(s) if (s < lo_x or s >= hi_x) else cur
+        if cand != cur:
+            if cand == pending:
+                pend_days += 1
+            else:
+                pending, pend_days = cand, 1
+            if pend_days >= confirm:
+                cur, pend_days = cand, 0
+        else:
+            pending, pend_days = cur, 0
+        out[i] = cur
+    return pd.Series(out, index=score.index)
+
+
+def run_cycle_strategy_hysteresis(score: pd.Series, price: pd.Series,
+                                  delta: float = 0.05, confirm: int = 5,
+                                  cost: float = 0.001) -> dict:
+    """
+    滞回档位仓位策略 (决策层现网同款规则), 计单边 cost 交易成本。
+    与 run_cycle_strategy 同结构, 另含换档次数。
+    """
+    common = pd.DataFrame({"score": score, "price": price}).dropna()
+    px = common["price"]
+    ret = px.pct_change().fillna(0)
+    bands = hysteresis_band_indices(common["score"], delta, confirm)
+    pos = bands.map(lambda i: CYCLE_BANDS[i][3]).shift(1).fillna(0.4)
+
+    dpos = pos.diff().abs().fillna(0)
+    strat_ret = pos * ret - dpos * cost
+    eq = pd.DataFrame({"策略": (1 + strat_ret).cumprod()}, index=common.index)
+
+    n_switches = int((bands.diff() != 0).sum()) - 1
+    return {
+        "equity": eq, "metrics": {"策略": strategy_metrics(eq["策略"], strat_ret)},
+        "turnover": float(dpos.sum()), "avg_pos": float(pos.mean()),
+        "position": pos, "bands": bands, "n_switches": n_switches,
+    }
 
 
 def md_table(df: pd.DataFrame, floatfmt="{:+.1f}") -> str:

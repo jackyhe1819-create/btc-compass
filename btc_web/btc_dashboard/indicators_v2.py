@@ -19,9 +19,68 @@ import requests
 from datetime import datetime, timezone
 
 from .core import IndicatorResult
+from .scoring import _percentile_score, _percentile_note, PERCENTILE_WINDOW
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
             "Accept": "application/json"}
+
+
+# ============================================================
+# 链上周期指标的分位数评分 (2026-07 对抗性审查修复)
+#
+# 问题: MVRV-Z / NUPL / Puell 的顶部绝对阈值 (5 / 0.75 / 4) 按早期周期
+# 振幅校准, 振幅衰减后本轮永远打不出 -1 (本轮峰值 Z≈3.5, NUPL≈0.6),
+# 顶部识别系统性偏钝 — 与趋势伸展桶已修复的是同一个病。
+#
+# 修复: 与趋势桶同口径的 4 年滚动分位数为主, 绝对阈值做"极值保底"
+# (取两者更极端者), 保留 Z<0 跌破全网成本这类结构性语义不受窗口限制。
+# 历史序列来自 CoinMetrics (history._fetch_cm_history, 6h 缓存),
+# 不可用时自动回退纯绝对阈值打分。
+# ============================================================
+
+def _cm_chip_series(key: str):
+    """CoinMetrics 派生链上序列 (mvrv_z / nupl / puell), 近4年。失败 None。"""
+    try:
+        from .history import _fetch_cm_history
+        hist = _fetch_cm_history(PERCENTILE_WINDOW)
+        if not hist or not hist.get(key):
+            return None
+        s = pd.Series(hist[key], dtype=float).dropna()
+        return s if len(s) >= PERCENTILE_WINDOW // 4 else None
+    except Exception as e:
+        print(f"⚠️ CM 链上历史 [{key}] 获取失败: {e}")
+        return None
+
+
+def _pct_floor_score(key: str, abs_score: float):
+    """
+    分位数评分 + 绝对阈值极值保底。
+    返回 (score, note) 或 None (历史不可用 → 调用方保持纯绝对阈值)。
+    分位数基于 CM 序列自身末值计算, 与窗口同源, 避免 bd/CM 两家
+    std 口径不一致造成的错位。
+    """
+    s = _cm_chip_series(key)
+    if s is None:
+        return None
+    pct_score, n_used = _percentile_score(s)
+    if np.isnan(pct_score):
+        return None
+    pct = (0.5 - pct_score / 2) * 100
+    note = _percentile_note(pct, n_used)
+    if abs(abs_score) > abs(pct_score):
+        return float(abs_score), f"{note} · 绝对阈值保底"
+    return float(pct_score), note
+
+
+def _score_color(score: float) -> str:
+    """与 apply_percentile_overrides 同一套颜色映射。"""
+    if score >= 0.3:
+        return "🟢"
+    if score <= -0.6:
+        return "🔴"
+    if score <= -0.3:
+        return "🟠"
+    return "🟡"
 
 
 def calc_mvrv_z() -> IndicatorResult:
@@ -33,31 +92,43 @@ def calc_mvrv_z() -> IndicatorResult:
     z = _bd_last("mvrv-zscore", "mvrvZscore")
 
     if z is None:
+        # 备源: CoinMetrics 派生序列末值 (口径略有差异, 但优于无数据)
+        s = _cm_chip_series("mvrv_z")
+        if s is not None and len(s):
+            z = float(s.iloc[-1])
+
+    if z is None:
         return IndicatorResult(
             name="MVRV-Z", value=float('nan'), score=0, color="⚪",
             status="数据源暂不可用", priority="P0",
             url="https://www.bitcoinmagazinepro.com/charts/mvrv-zscore/",
             description="MVRV Z-Score 衡量市值相对已实现市值（全网持仓成本）的标准差偏离。",
-            method="数据源 bitcoin-data.com 暂不可用。")
+            method="数据源 bitcoin-data.com / CoinMetrics 均暂不可用。")
 
     if z < 0:
-        score, color, label = 1, "🟢", "周期底部带 — 历史级低估"
+        score, label = 1, "周期底部带 — 历史级低估"
     elif z < 1:
-        score, color, label = 0.5, "🟢", "低估区"
+        score, label = 0.5, "低估区"
     elif z < 3:
-        score, color, label = 0, "🟡", "中性区"
+        score, label = 0, "中性区"
     elif z < 5:
-        score, color, label = -0.5, "🟠", "偏热区"
+        score, label = -0.5, "偏热区"
     else:
-        score, color, label = -1, "🔴", "周期顶部带 — 历史级高估"
+        score, label = -1, "周期顶部带 — 历史级高估"
+
+    # 4年分位数为主, 绝对阈值极值保底 (修复周期振幅衰减导致顶部打分偏钝)
+    note = ""
+    enhanced = _pct_floor_score("mvrv_z", score)
+    if enhanced is not None:
+        score, note = enhanced
 
     return IndicatorResult(
-        name="MVRV-Z", value=round(z, 3), score=score, color=color,
-        status=f"{label} (Z={z:.2f})",
+        name="MVRV-Z", value=round(z, 3), score=score, color=_score_color(score),
+        status=f"{label} (Z={z:.2f})" + (f" | {note}" if note else ""),
         priority="P0",
         url="https://www.bitcoinmagazinepro.com/charts/mvrv-zscore/",
-        description="MVRV Z-Score 是链上周期估值的黄金标准：市值偏离全网持仓成本的标准差数。历史上 <0 为周期底部带，>5（早期 >7）为顶部带。",
-        method="Z = (市值 - 已实现市值) / 市值标准差。数据源: bitcoin-data.com 免费链上 API。")
+        description="MVRV Z-Score 是链上周期估值的黄金标准：市值偏离全网持仓成本的标准差数。历史上 <0 为周期底部带，>5（早期 >7）为顶部带；因周期振幅递减，评分以 4 年分位数为主、绝对阈值做极值保底。",
+        method="Z = (市值 - 已实现市值) / 市值标准差。评分 = 4年滚动分位数 (CoinMetrics 序列)，与绝对阈值 (0/1/3/5) 取更极端者；历史序列不可用时回退纯绝对阈值。数据源: bitcoin-data.com + CoinMetrics，6h 缓存。")
 
 
 def calc_stablecoin_growth() -> IndicatorResult:
@@ -449,6 +520,11 @@ def calc_nupl() -> IndicatorResult:
     """
     nupl = _bd_last("nupl", "nupl")
     if nupl is None:
+        s = _cm_chip_series("nupl")
+        if s is not None and len(s):
+            nupl = float(s.iloc[-1])
+
+    if nupl is None:
         return IndicatorResult(
             name="NUPL", value=float('nan'), score=0, color="⚪",
             status="数据源暂不可用", priority="P0",
@@ -456,22 +532,28 @@ def calc_nupl() -> IndicatorResult:
             description="全网未实现盈亏 / 市值，周期情绪分区。", method="数据源暂不可用。")
 
     if nupl < 0:
-        score, color, label = 1, "🟢", "投降区 — 全网浮亏"
+        score, label = 1, "投降区 — 全网浮亏"
     elif nupl < 0.25:
-        score, color, label = 0.5, "🟢", "希望/恐惧区"
+        score, label = 0.5, "希望/恐惧区"
     elif nupl < 0.5:
-        score, color, label = 0, "🟡", "乐观区"
+        score, label = 0, "乐观区"
     elif nupl < 0.75:
-        score, color, label = -0.5, "🟠", "信仰/贪婪区"
+        score, label = -0.5, "信仰/贪婪区"
     else:
-        score, color, label = -1, "🔴", "兴奋区 — 周期顶部带"
+        score, label = -1, "兴奋区 — 周期顶部带"
+
+    note = ""
+    enhanced = _pct_floor_score("nupl", score)
+    if enhanced is not None:
+        score, note = enhanced
 
     return IndicatorResult(
-        name="NUPL", value=round(nupl, 4), score=score, color=color,
-        status=f"{label} ({nupl:.3f})", priority="P0",
+        name="NUPL", value=round(nupl, 4), score=score, color=_score_color(score),
+        status=f"{label} ({nupl:.3f})" + (f" | {note}" if note else ""),
+        priority="P0",
         url="https://charts.bgeometrics.com/nupl.html",
-        description="Net Unrealized Profit/Loss：全网持仓的未实现盈亏占市值比例，比 MVRV-Z 更直观的周期情绪分区。历史大底都出现在 <0 的投降区，大顶在 >0.75 的兴奋区。",
-        method="NUPL = (市值 - 已实现市值) / 市值。数据源: bitcoin-data.com，6h 缓存。")
+        description="Net Unrealized Profit/Loss：全网持仓的未实现盈亏占市值比例，比 MVRV-Z 更直观的周期情绪分区。历史大底都出现在 <0 的投降区，大顶在 >0.75 的兴奋区；因周期振幅递减，评分以 4 年分位数为主、绝对阈值做极值保底。",
+        method="NUPL = (市值 - 已实现市值) / 市值。评分 = 4年滚动分位数 (CoinMetrics 序列)，与绝对阈值 (0/0.25/0.5/0.75) 取更极端者；历史不可用时回退纯绝对阈值。数据源: bitcoin-data.com + CoinMetrics，6h 缓存。")
 
 
 def calc_sopr() -> IndicatorResult:
@@ -513,6 +595,11 @@ def calc_puell_multiple() -> IndicatorResult:
     """
     puell = _bd_last("puell-multiple", "puellMultiple")
     if puell is None:
+        s = _cm_chip_series("puell")
+        if s is not None and len(s):
+            puell = float(s.iloc[-1])
+
+    if puell is None:
         return IndicatorResult(
             name="Puell Multiple", value=float('nan'), score=0, color="⚪",
             status="数据源暂不可用", priority="P0",
@@ -520,22 +607,28 @@ def calc_puell_multiple() -> IndicatorResult:
             description="矿工收入相对一年均值的倍数。", method="数据源暂不可用。")
 
     if puell < 0.5:
-        score, color, label = 1, "🟢", "矿工收入极度压缩 — 历史底部带"
+        score, label = 1, "矿工收入极度压缩 — 历史底部带"
     elif puell < 0.8:
-        score, color, label = 0.5, "🟢", "矿工承压区"
+        score, label = 0.5, "矿工承压区"
     elif puell < 2.0:
-        score, color, label = 0, "🟡", "正常区间"
+        score, label = 0, "正常区间"
     elif puell < 4.0:
-        score, color, label = -0.5, "🟠", "矿工收入偏高"
+        score, label = -0.5, "矿工收入偏高"
     else:
-        score, color, label = -1, "🔴", "矿工暴利 — 周期顶部带"
+        score, label = -1, "矿工暴利 — 周期顶部带"
+
+    note = ""
+    enhanced = _pct_floor_score("puell", score)
+    if enhanced is not None:
+        score, note = enhanced
 
     return IndicatorResult(
-        name="Puell Multiple", value=round(puell, 3), score=score, color=color,
-        status=f"{label} ({puell:.2f})", priority="P0",
+        name="Puell Multiple", value=round(puell, 3), score=score, color=_score_color(score),
+        status=f"{label} ({puell:.2f})" + (f" | {note}" if note else ""),
+        priority="P0",
         url="https://charts.bgeometrics.com/puell_multiple.html",
-        description="矿工日收入(USD)相对其 365 日均值的倍数。矿工是结构性卖方，其收入周期与价格周期强相关：收入极度压缩时矿工投降出清（底部），暴利时派发（顶部）。覆盖'关机币价'视角。",
-        method="Puell = 日发行价值 / 365日MA。<0.5 底部带 +1，>4 顶部带 -1。数据源: bitcoin-data.com，6h 缓存。")
+        description="矿工日收入(USD)相对其 365 日均值的倍数。矿工是结构性卖方，其收入周期与价格周期强相关：收入极度压缩时矿工投降出清（底部），暴利时派发（顶部）。覆盖'关机币价'视角；因周期振幅递减，评分以 4 年分位数为主、绝对阈值做极值保底。",
+        method="Puell = 日发行价值 / 365日MA。评分 = 4年滚动分位数 (CoinMetrics 序列)，与绝对阈值 (0.5/0.8/2/4) 取更极端者；历史不可用时回退纯绝对阈值。数据源: bitcoin-data.com + CoinMetrics，6h 缓存。")
 
 
 def calc_hash_ribbons() -> IndicatorResult:
@@ -695,7 +788,7 @@ def calc_exchange_balance_v2() -> IndicatorResult:
 
 def calc_exchange_netflow_7d() -> IndicatorResult:
     """
-    交易所净流(7d) — 战术级短窗口版本 (尚未接入战术分桶, 待启用)。
+    交易所净流(7d) — 战术级短窗口版本 (2026-06 起接入战术分"链上资金流"桶, 权重 15%)。
     回测 (2018-2026): 7d 净流/存量 在 7-14 天前瞻上 IC +0.10~+0.13,
     高于杠杆温度桶现有的资金费率因子。
     阈值 = 2018+ 7d净流/存量 分布的 10/25/75/90 分位。

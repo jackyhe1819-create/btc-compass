@@ -41,7 +41,7 @@ def _daily_scores(buckets_cfg: dict, factor_df: pd.DataFrame) -> pd.DataFrame:
             v = values[r, col_idx[name]]
             if not np.isnan(v):
                 inds[name] = MockInd(value=1.0, score=float(v))
-        total, detail = _compute_bucket_scores(buckets_cfg, inds)
+        total, detail, _cov = _compute_bucket_scores(buckets_cfg, inds)
         # 全因子缺失时现网返回 0.0, 回测里记为 NaN 更诚实
         any_member = bool(inds)
         rows["score"].append(total if any_member else np.nan)

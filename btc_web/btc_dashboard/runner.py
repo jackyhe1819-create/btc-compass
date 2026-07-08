@@ -50,75 +50,9 @@ from .history import (
 )
 
 
-# ============================================================
-# 评分权重
-# ============================================================
-
-# 权重配置 (长周期偏置 · 适合大周期长期决策)
-WEIGHTS = {
-    # ═══ 长期周期指标 65% (顶底定位核心) ═══
-    "Pi Cycle Top": 0.10,
-    "200-Week Heatmap": 0.10,
-    "Mayer Multiple": 0.09,
-    "2-Year MA Mult": 0.08,
-    "Ahr999": 0.08,
-    "幂律走廊": 0.08,
-    "Golden Ratio": 0.07,
-    "减半周期": 0.05,
-    # ═══ 结构/链上指标 27% (LTH 行为 + 供需) ═══
-    "长期持有者(CDD)": 0.10,
-    "均衡价格": 0.05,
-    "交易所余额": 0.04,
-    "ETF资金流": 0.03,
-    "BTC市占率": 0.02,
-    "全网算力": 0.02,
-    "MSTR mNAV": 0.01,
-    "公司持仓": 0.00,
-    # ═══ 短期指标 8% (仅极端情绪反向确认) ═══
-    "恐惧贪婪指数": 0.05,
-    "RSI(14)": 0.02,
-    "MACD": 0.01,
-    "布林带": 0.00,
-    "资金费率": 0.00,
-    "多空比": 0.00,
-    "最大痛点": 0.00,
-}  # 总和 = 1.00 (100%)
-
-
-def calculate_total_score(indicators: Dict[str, IndicatorResult]) -> Tuple[float, str]:
-    """计算加权总分"""
-    total = 0
-    weight_sum = 0
-    
-    for name, result in indicators.items():
-        # 这里需要注意名字匹配：Calculator returns "长期持有者(CDD)"
-        if not np.isnan(result.value) and name in WEIGHTS:
-            total += WEIGHTS[name] * result.score
-            weight_sum += WEIGHTS[name]
-    
-    # 归一化
-    if weight_sum > 0:
-        normalized_score = total / weight_sum
-    else:
-        normalized_score = 0
-            
-    # 生成建议 (阈值采用斐波那契黄金分割: 0.618 / 0.382 / 0.146)
-    if normalized_score >= 0.618:
-        recommendation = "强烈买入 (Strong Buy)"
-    elif normalized_score >= 0.382:
-        recommendation = "买入 (Buy)"
-    elif normalized_score >= 0.146:
-        recommendation = "增持 (Accumulate)"
-    elif normalized_score >= -0.146:
-        recommendation = "持有/观望 (Hold)"
-    elif normalized_score >= -0.382:
-        recommendation = "减仓 (Reduce)"
-    elif normalized_score >= -0.618:
-        recommendation = "卖出 (Sell)"
-    else:
-        recommendation = "清仓 (Strong Sell)"
-        
-    return normalized_score, recommendation
+# 注: 原版的单一加权总分 (WEIGHTS + calculate_total_score) 已于 2026-07 移除 —
+# BTC Compass 全面切换双评分 (scoring.compute_dual_scores) 后成为死代码,
+# 留着容易被误读为现行权重。原版实现见 btc_web (5050) 仓库。
 
 
 # ============================================================
@@ -356,6 +290,10 @@ def run_dashboard() -> DashboardResult:
     """运行仪表盘分析 — 并行版本"""
     # 获取历史数据（用于计算指标）
     df = fetch_btc_data()
+    data_source = str(df.attrs.get("source", "未知"))
+    data_synthetic = bool(df.attrs.get("synthetic", False))
+    if data_synthetic:
+        print("🚨 价格数据为合成示例数据 — 评分仅作管线演示, 将标记为无效")
 
     # 优先使用实时价格 API，失败则回退到历史数据最新价格
     realtime_price = fetch_realtime_btc_price()
@@ -451,16 +389,27 @@ def run_dashboard() -> DashboardResult:
     # 计算双评分（周期分 + 战术分, 含分位数归一化与因子桶明细）
     scores = compute_dual_scores(indicators, df)
 
+    recommendation = scores["cycle_recommendation"]
+    tactical_recommendation = scores["tactical_recommendation"]
+    if data_synthetic:
+        # 合成数据熔断: 分数照常计算 (便于调试管线), 但建议文本明确标记无效
+        recommendation = "🚨 全部价格源失效 — 当前为演示数据, 评分无效, 请勿参考"
+        tactical_recommendation = "🚨 演示数据, 评分无效"
+
     result = DashboardResult(
         timestamp=datetime.now(),
         btc_price=current_price,
         indicators=indicators,
         total_score=scores["cycle_score"],
-        recommendation=scores["cycle_recommendation"],
+        recommendation=recommendation,
         tactical_score=scores["tactical_score"],
-        tactical_recommendation=scores["tactical_recommendation"],
+        tactical_recommendation=tactical_recommendation,
         cycle_buckets=scores["cycle_buckets"],
         tactical_buckets=scores["tactical_buckets"],
+        data_source=data_source,
+        data_synthetic=data_synthetic,
+        cycle_coverage=scores["cycle_coverage"],
+        tactical_coverage=scores["tactical_coverage"],
     )
 
     return result

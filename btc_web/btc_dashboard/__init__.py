@@ -57,15 +57,15 @@ from .history import get_indicator_history
 from .summarizer import summarize_builders_feed
 
 # 评分汇总 / sparkline / 主入口 / RSS
+# (原版单一加权总分 WEIGHTS/calculate_total_score 已随双评分切换移除)
 from .runner import (
-    WEIGHTS,
-    calculate_total_score,
     print_dashboard,
     get_sparklines,
     run_dashboard,
     fetch_builders_feed,
     main,
 )
+from .scoring import compute_dual_scores
 
 __all__ = [
     # 类型
@@ -73,7 +73,6 @@ __all__ = [
     # 常量
     "GENESIS_DATE", "HALVING_DATES", "NEXT_HALVING_ESTIMATE",
     "POWER_LAW_INTERCEPT", "POWER_LAW_SLOPE", "AHR999_A", "AHR999_B",
-    "WEIGHTS",
     # 价格
     "fetch_realtime_btc_price", "fetch_btc_data", "generate_sample_data",
     # 指标
@@ -93,7 +92,7 @@ __all__ = [
     # 历史
     "get_indicator_history",
     # 汇总
-    "calculate_total_score", "print_dashboard", "get_sparklines",
+    "compute_dual_scores", "print_dashboard", "get_sparklines",
     "run_dashboard", "fetch_builders_feed", "main",
 ]
 

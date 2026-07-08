@@ -19,14 +19,14 @@ _HISTORY_FILE = "score_history.json"
 _MAX_ENTRIES = 730  # 最多保留 2 年
 
 
-# 周期分仓位档位（与 scoring.cycle_recommendation 阈值一致）
+# 周期分仓位档位（与 scoring.cycle_recommendation 阈值一致, 2026-07 重标定）
 _BANDS = [
-    (0.618, "重仓区"),
-    (0.382, "偏多配置"),
-    (0.146, "标准配置"),
-    (-0.146, "中性观望"),
-    (-0.382, "减配"),
-    (-0.618, "低配"),
+    (0.45, "重仓区"),
+    (0.30, "偏多配置"),
+    (0.15, "标准配置"),
+    (0.00, "中性观望"),
+    (-0.12, "减配"),
+    (-0.30, "低配"),
     (float("-inf"), "防守区"),
 ]
 
@@ -75,6 +75,11 @@ def _save_history(cache_dir: str, entries: list):
         print(f"⚠️ 写入评分历史失败: {e}")
 
 
+def load_history_entries(cache_dir: str) -> list:
+    """公开的历史条目读取 (决策引擎滞回重放用), 按日期升序。"""
+    return _load_history(cache_dir)
+
+
 def record_score_snapshot(dashboard: dict, cache_dir: str):
     """
     记录一次仪表盘快照到评分历史。
@@ -100,6 +105,10 @@ def record_score_snapshot(dashboard: dict, cache_dir: str):
         "total_score": round(float(dashboard.get("total_score", 0)), 4),
         "recommendation": dashboard.get("recommendation", ""),
         "tactical_score": round(float(dashboard.get("tactical_score", 0)), 4),
+        # 因子覆盖率审计字段: 不同日期的分数可能由不同因子集合构成 (失败剔除重归一),
+        # 记录覆盖率使历史曲线的纵向可比性可核查 (2026-07)
+        "cycle_coverage": dashboard.get("cycle_coverage"),
+        "tactical_coverage": dashboard.get("tactical_coverage"),
         "scores": scores,
         "statuses": statuses,
     }

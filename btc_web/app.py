@@ -85,12 +85,20 @@ from btc_dashboard import (
     fetch_crypto_calendar, fetch_whale_volume_stats, fetch_exchange_balance_display,
     fetch_builders_feed, fetch_dat_holdings
 )
-from btc_dashboard.score_history import record_score_snapshot, get_score_history
+from btc_dashboard.score_history import record_score_snapshot, get_score_history, load_history_entries
+from btc_dashboard.decision import compute_decision
 from btc_dashboard.derivatives import fetch_derivatives_panel
 from btc_dashboard.etf_flow import fetch_etf_flow_history
 
 app = Flask(__name__)
-app.json.sort_keys = False  # 保持后端字典插入序 (指标卡片按 runner._CARD_ORDER 语义排序)
+app.json.sort_keys = False
+
+
+@app.after_request
+def _add_cors(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
 
 # ── BTC 价格/指标缓存（5 分钟）──────────────────────────────────────
 _btc_data_cache = None
@@ -158,16 +166,33 @@ def _do_refresh_dashboard():
             "tactical_recommendation": result.tactical_recommendation,
             "cycle_buckets": result.cycle_buckets,
             "tactical_buckets": result.tactical_buckets,
+            "data_source": result.data_source,
+            "data_synthetic": result.data_synthetic,
+            "cycle_coverage": result.cycle_coverage,
+            "tactical_coverage": result.tactical_coverage,
             "indicators": indicators_json,
             "sparklines": sparklines
         }
         _dashboard_cache_timestamp = datetime.now()
         _save_cache_to_disk("dashboard", _dashboard_cache, _dashboard_cache_timestamp)
         # 记录每日评分快照（用于评分历史曲线 + 今日信号变化）
+        # 合成演示数据不入历史 — 避免污染评分曲线与信号变化检测
+        if result.data_synthetic:
+            print("🚨 演示数据 — 跳过评分快照记录")
+        else:
+            try:
+                record_score_snapshot(_dashboard_cache, _CACHE_DIR)
+            except Exception as e:
+                print(f"⚠️ 评分快照记录失败: {e}")
+
+        # 量化决策 (滞回仓位 + 执行节奏) — 依赖已落盘的评分历史, 故在快照之后算
         try:
-            record_score_snapshot(_dashboard_cache, _CACHE_DIR)
+            _dashboard_cache["decision"] = compute_decision(
+                _dashboard_cache, load_history_entries(_CACHE_DIR))
+            _save_cache_to_disk("dashboard", _dashboard_cache, _dashboard_cache_timestamp)
         except Exception as e:
-            print(f"⚠️ 评分快照记录失败: {e}")
+            print(f"⚠️ 量化决策计算失败: {e}")
+            _dashboard_cache["decision"] = None
         print(f"✅ 仪表盘缓存刷新完成 {_dashboard_cache_timestamp.strftime('%H:%M:%S')}")
     except Exception as e:
         global _last_error

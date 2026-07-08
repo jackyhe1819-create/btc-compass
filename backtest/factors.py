@@ -62,6 +62,20 @@ def rolling_percentile_score(series: pd.Series,
     return score.reindex(series.index)
 
 
+def _extreme_combine(pct: pd.Series, abs_: pd.Series) -> pd.Series:
+    """
+    复刻 indicators_v2._pct_floor_score 的合成规则:
+    分位数分为主, 绝对阈值分做极值保底 (逐日取 |·| 更大者)。
+    一侧 NaN 时自动用另一侧。
+    """
+    out = pct.copy()
+    both = pct.notna() & abs_.notna()
+    use_abs = both & (abs_.abs() > pct.abs())
+    out[use_abs] = abs_[use_abs]
+    out = out.where(pct.notna(), abs_)
+    return out
+
+
 # ------------------------------------------------------------
 # 周期分因子
 # ------------------------------------------------------------
@@ -100,31 +114,41 @@ def cycle_factor_scores(cm: pd.DataFrame,
     out["Ahr999"] = rolling_percentile_score((price / geo200) * powerlaw)
 
     # Pi Cycle Top: 离散打分 (calc_pi_cycle, 不走分位数)
+    # 2026-07 对抗性审查修复: 顶部探测器只有 {0,-0.5,-1} 三态,
+    # "远离交叉"是无信号 (0) 而非看多 (+1)
     ma111 = price.rolling(111).mean()
     ma350x2 = price.rolling(350).mean() * 2
     gap_pct = (ma350x2 - ma111) / ma350x2 * 100
     pi = pd.Series(np.nan, index=idx, dtype=float)
     valid = ma111.notna() & ma350x2.notna()
     pi[valid & (ma111 >= ma350x2)] = -1.0
-    pi[valid & (ma111 < ma350x2) & (gap_pct <= 20)] = 0.0
-    pi[valid & (ma111 < ma350x2) & (gap_pct > 20)] = 1.0
+    pi[valid & (ma111 < ma350x2) & (gap_pct <= 20)] = -0.5
+    pi[valid & (ma111 < ma350x2) & (gap_pct > 20)] = 0.0
     out["Pi Cycle Top"] = pi
 
     # ---- 链上筹码桶 ----
-    # MVRV-Z = (市值 - 已实现市值) / 全历史扩张 std(市值)   [calc_mvrv_z 阈值]
+    # MVRV-Z (2026-07 对抗性审查修复: 分位数为主 + 绝对阈值极值保底)
+    # 绝对阈值腿: 全历史扩张 std (近似 bd/Glassnode 口径)   [calc_mvrv_z 阈值]
+    # 分位数腿:   rolling(730) std 派生序列的 4 年分位 (与现网 _fetch_cm_history 同口径)
     mcap = cm["mcap"]
     rcap = mcap / cm["mvrv"]
     mvrv_z = (mcap - rcap) / mcap.expanding(min_periods=365).std()
-    out["MVRV-Z"] = _step_score(mvrv_z, [0, 1, 3, 5], [1, 0.5, 0, -0.5, -1])
+    mvrv_z_730 = (mcap - rcap) / mcap.rolling(730).std()
+    out["MVRV-Z"] = _extreme_combine(
+        rolling_percentile_score(mvrv_z_730),
+        _step_score(mvrv_z, [0, 1, 3, 5], [1, 0.5, 0, -0.5, -1]))
 
     # STH成本线: 现价/STH已实现价格   [calc_sth_realized_price 阈值]
     sth_ratio = price / bd_sth.reindex(idx)
     out["STH成本线"] = _step_score(sth_ratio, [0.80, 0.95, 1.15, 1.35],
                                    [1, 0.5, 0, -0.5, -1])
 
-    # NUPL = (市值-已实现市值)/市值 = 1 - 1/MVRV   [calc_nupl 阈值]
+    # NUPL = (市值-已实现市值)/市值 = 1 - 1/MVRV
+    # 2026-07: 分位数为主 + 绝对阈值保底   [calc_nupl]
     nupl = 1 - 1 / cm["mvrv"]
-    out["NUPL"] = _step_score(nupl, [0, 0.25, 0.5, 0.75], [1, 0.5, 0, -0.5, -1])
+    out["NUPL"] = _extreme_combine(
+        rolling_percentile_score(nupl),
+        _step_score(nupl, [0, 0.25, 0.5, 0.75], [1, 0.5, 0, -0.5, -1]))
 
     # 交易所余额 v2 (2026-06 重构): 30日存量变化率, 2018+ 分位数阈值
     # 与现网 calc_exchange_balance_v2 同口径 (10/25/75/90 分位 ≈ -2.1/-0.85/+1.3/+2.9)
@@ -163,10 +187,12 @@ def cycle_factor_scores(cm: pd.DataFrame,
     out["趋势过滤器"] = trend
 
     # ---- 矿工经济桶 ----
-    # Puell = 日发行价值 / 365日均值   [calc_puell_multiple 阈值]
+    # Puell = 日发行价值 / 365日均值
+    # 2026-07: 分位数为主 + 绝对阈值保底   [calc_puell_multiple]
     puell = cm["iss_usd"] / cm["iss_usd"].rolling(365).mean()
-    out["Puell Multiple"] = _step_score(puell, [0.5, 0.8, 2.0, 4.0],
-                                        [1, 0.5, 0, -0.5, -1])
+    out["Puell Multiple"] = _extreme_combine(
+        rolling_percentile_score(puell),
+        _step_score(puell, [0.5, 0.8, 2.0, 4.0], [1, 0.5, 0, -0.5, -1]))
 
     # Hash Ribbons   [calc_hash_ribbons]
     hr = cm["hashrate"]
@@ -293,8 +319,9 @@ def momentum_scores(price: pd.Series, start: str = "2017-06-01") -> pd.DataFrame
     """
     逐日重算 RSI 与 MACD 复合分 (有重采样部分桶, 必须日循环保证 point-in-time)。
     现网差异声明:
-    - 现网 RSI 的 "4H/12H" 实际就是日线序列切片 (无真实盘中数据), 此处如实复刻
-    - 现网 MACD 含 OKX 真实 4H/12H K线两腿, 历史不可得, 回测仅 日/周/月 三腿
+    - 现网 RSI/MACD 均含 OKX 真实 4H/12H K线两腿 (2026-07 起 RSI 也改真实K线),
+      历史不可得, 回测均为 日/周/月 三腿
+    - 现网 RSI 已移除年线腿与伪 4H/12H 切片 (旧版日线被三重计票), 回测同步
     """
     dates = price.index[price.index >= pd.Timestamp(start)]
     rsi_out, macd_out = {}, {}
@@ -308,20 +335,13 @@ def momentum_scores(price: pd.Series, start: str = "2017-06-01") -> pd.DataFrame
 
         wk = hist.resample("W").last().dropna()
         mo = hist.resample("ME").last().dropna()
-        yr = hist.resample("YE").last().dropna()
 
-        # ---- RSI: 日线 + 伪4H(tail 6的倍数) + 伪12H(tail 一半) + 周/月/年 ----
+        # ---- RSI: 日 + 周 + 月 (真实 4H/12H 历史不可得) ----
         votes = [_rsi_vote(_rsi_last(arr))]
-        if len(arr) >= 70:
-            n6 = len(arr) // 6 * 6
-            votes.append(_rsi_vote(_rsi_last(arr[-n6:])))
-            votes.append(_rsi_vote(_rsi_last(arr[-(len(arr) // 2):])))
         if len(wk) >= 15:
             votes.append(_rsi_vote(_rsi_last(wk.values)))
         if len(mo) >= 15:
             votes.append(_rsi_vote(_rsi_last(mo.values)))
-        if len(yr) >= 5:
-            votes.append(_rsi_vote(_rsi_last(yr.values, period=min(14, len(yr) - 1))))
         rsi_out[d] = _rsi_composite(votes)
 
         # ---- MACD: 日 + 周 + 月 ----

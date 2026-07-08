@@ -196,14 +196,16 @@ def calc_pi_cycle(df: pd.DataFrame) -> IndicatorResult:
     # 计算差距百分比
     gap_pct = (ma350x2 - ma111) / ma350x2 * 100
     
-    # 评分逻辑
+    # 评分逻辑 — 顶部探测器只有 {0, -0.5, -1} 三态:
+    # "远离交叉"是无信号而非看多信号。旧版 gap>20% 给 +1, 导致熊市下跌途中
+    # (跌得越深 gap 越大) 该指标反而打满分看多 (2026-07 对抗性审查修复)
     if ma111 >= ma350x2:
         score, color, status = -1, "🔴", f"已交叉! 顶部信号"
     elif gap_pct <= 20:
-        score, color, status = 0, "🟡", f"差距 {gap_pct:.1f}%, 接近交叉"
+        score, color, status = -0.5, "🟠", f"差距 {gap_pct:.1f}%, 接近交叉"
     else:
-        score, color, status = 1, "🟢", f"差距 {gap_pct:.1f}%, 安全"
-    
+        score, color, status = 0, "🟡", f"差距 {gap_pct:.1f}%, 远离顶部(不计分)"
+
     return IndicatorResult(
         name="Pi Cycle Top",
         value=gap_pct,
@@ -212,8 +214,8 @@ def calc_pi_cycle(df: pd.DataFrame) -> IndicatorResult:
         status=status,
         priority="P0",
         url="https://www.lookintobitcoin.com/charts/pi-cycle-top-indicator/",
-        description="Pi Cycle Top 指标用于识别比特币市场周期的顶部，历史上准确率极高。",
-        method="由两条移动平均线组成：111日均线 (111DMA) 和 350日均线的两倍 (350DMA x 2)。当 111DMA 上穿 350DMA x 2 时，预示市场顶部。"
+        description="Pi Cycle Top 指标用于识别比特币市场周期的顶部，历史上准确率极高。它是单向的顶部探测器：远离交叉只代表'没有顶部信号'，不构成看多依据。",
+        method="由两条移动平均线组成：111日均线 (111DMA) 和 350日均线的两倍 (350DMA x 2)。111DMA 上穿 350DMA x 2 → -1（顶部信号）；差距≤20% → -0.5（接近交叉）；其余 → 0（无信号，不计分）。"
     )
 
 

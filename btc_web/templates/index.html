@@ -16,7 +16,7 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>₿</text></svg>">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-3">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-6">
     <!-- 防止主题闪烁：在 CSS 加载前立即恢复主题（v2: 默认米白色） -->
     <script>
         (function() {
@@ -108,6 +108,20 @@
                 </div>
                 <!-- TradingView Widget END -->
             </div>
+
+            <!-- 今日量化决策（双评分 → 可执行决策，滞回防抖 + 回测统计） -->
+            <section class="decision-section" id="decisionSection" style="display:none;">
+                <div class="decision-header">
+                    <h2>🎯 今日量化决策</h2>
+                    <span class="decision-meta" id="decisionMeta"></span>
+                </div>
+                <div class="decision-grid">
+                    <div class="decision-card" id="decisionCycle"></div>
+                    <div class="decision-card" id="decisionTactical"></div>
+                </div>
+                <div class="decision-warnings" id="decisionWarnings" style="display:none;"></div>
+                <div class="decision-footnote" id="decisionFootnote"></div>
+            </section>
 
             <!-- Score Gauge + Summary Table -->
             <section class="gauge-section">
@@ -204,16 +218,19 @@
                                     </div>
                                 </div>
                                 <div class="explain-section">
-                                    <h4>仓位档位（周期分 · 斐波那契阈值）</h4>
+                                    <h4>仓位档位（周期分 · 按 2014+ 评分分布分位数标定）</h4>
                                     <table class="explain-table">
-                                        <tr><td class="range-cell green">≥ 0.618</td><td>重仓区 80-100%</td></tr>
-                                        <tr><td class="range-cell green">0.382 ~ 0.618</td><td>偏多配置 60-80%</td></tr>
-                                        <tr><td class="range-cell green-light">0.146 ~ 0.382</td><td>标准配置 40-60%</td></tr>
-                                        <tr><td class="range-cell yellow">-0.146 ~ 0.146</td><td>中性观望 30-50%</td></tr>
-                                        <tr><td class="range-cell orange">-0.382 ~ -0.146</td><td>减配 15-30%</td></tr>
-                                        <tr><td class="range-cell red">-0.618 ~ -0.382</td><td>低配 5-15%</td></tr>
-                                        <tr><td class="range-cell red">≤ -0.618</td><td>防守区 0-5%</td></tr>
+                                        <tr><td class="range-cell green">≥ 0.45</td><td>重仓区 80-100%（历史约 3% 天数）</td></tr>
+                                        <tr><td class="range-cell green">0.30 ~ 0.45</td><td>偏多配置 60-80%</td></tr>
+                                        <tr><td class="range-cell green-light">0.15 ~ 0.30</td><td>标准配置 40-60%</td></tr>
+                                        <tr><td class="range-cell yellow">0.00 ~ 0.15</td><td>中性观望 30-50%</td></tr>
+                                        <tr><td class="range-cell orange">-0.12 ~ 0.00</td><td>减配 15-30%</td></tr>
+                                        <tr><td class="range-cell red">-0.30 ~ -0.12</td><td>低配 5-15%</td></tr>
+                                        <tr><td class="range-cell red">≤ -0.30</td><td>防守区 0-5%（历史约 3% 天数）</td></tr>
                                     </table>
+                                    <p style="font-size:0.72rem; color:#888; margin-top:4px;">
+                                        旧斐波那契阈值 (±0.618/±0.382) 在桶平均压缩量程下极值档 12 年触发不足 1%，2026-07 按评分历史分位数重标定。
+                                    </p>
                                 </div>
                                 <div class="explain-section">
                                     <h4>关键修正（vs 原版）</h4>
@@ -230,7 +247,7 @@
                         <a href="https://asksurf.ai/chat/" target="_blank" rel="noopener noreferrer"
                            style="display:flex; align-items:center; gap:8px; margin: 12px auto 4px; padding: 8px 16px;
                                   background: rgba(247,147,34,0.12); border: 1px solid rgba(247,147,34,0.3);
-                                  border-radius: 10px; text-decoration: none; color: #f79322;
+                                  border-radius: 10px; text-decoration: none; color: var(--accent-btc);
                                   font-size: 0.82rem; font-weight: 500; width: fit-content;
                                   transition: background 0.2s;">
                             🤖 Crypto AI · AskSurf
@@ -240,7 +257,7 @@
                         <a href="https://minara.ai/app/chat" target="_blank" rel="noopener noreferrer"
                            style="display:flex; align-items:center; gap:8px; margin: 4px auto; padding: 8px 16px;
                                   background: rgba(247,147,34,0.12); border: 1px solid rgba(247,147,34,0.3);
-                                  border-radius: 10px; text-decoration: none; color: #f79322;
+                                  border-radius: 10px; text-decoration: none; color: var(--accent-btc);
                                   font-size: 0.82rem; font-weight: 500; width: fit-content;
                                   transition: background 0.2s;">
                             Minara.ai
@@ -360,7 +377,7 @@
         <h2 class="section-title">
             <span class="icon">📈</span>
             评分历史 & 今日变化
-            <span style="font-size: 0.75rem; color: #888; font-weight: normal; margin-left: 10px;">
+            <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal; margin-left: 10px;">
                 综合评分趋势 · 指标跨档信号
             </span>
         </h2>
@@ -368,7 +385,7 @@
             <!-- 左：评分历史曲线 -->
             <div class="news-card score-history-chart-card">
                 <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-                    <h3 style="color: #f79322; font-size: 1.0rem; margin:0;">综合评分走势 vs BTC 价格</h3>
+                    <h3 style="color: var(--accent-btc); font-size: 1.0rem; margin:0;">综合评分走势 vs BTC 价格</h3>
                     <div class="drawer-tabs" id="scoreHistoryTabs">
                         <button class="dtab" data-shdays="30">30天</button>
                         <button class="dtab active" data-shdays="90">90天</button>
@@ -384,12 +401,12 @@
             </div>
             <!-- 右：今日信号变化 -->
             <div class="news-card signal-changes-card">
-                <h3 style="color: #f79322; font-size: 1.0rem; margin:0 0 10px;">
+                <h3 style="color: var(--accent-btc); font-size: 1.0rem; margin:0 0 10px;">
                     🔔 今日信号变化
                     <span id="signalChangesMeta" style="font-size:0.72rem; color:#888; font-weight:normal; margin-left:8px;"></span>
                 </h3>
                 <div id="signalChanges" class="news-list" style="max-height: 280px; overflow-y: auto;">
-                    <p style="color: #888;">加载中...</p>
+                    <p style="color: var(--text-muted);">加载中...</p>
                 </div>
             </div>
         </div>
@@ -400,17 +417,17 @@
         <h2 class="section-title">
             <span class="icon">📉</span>
             衍生品杠杆面板
-            <span style="font-size: 0.75rem; color: #888; font-weight: normal; margin-left: 10px;">
+            <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal; margin-left: 10px;">
                 OI · 资金费率 · 多空比 · 清算
             </span>
-            <span id="derivUpdatedAt" style="font-size: 0.72rem; color: #555; font-weight: normal; margin-left: 12px;"></span>
+            <span id="derivUpdatedAt" style="font-size: 0.72rem; color: var(--text-muted); font-weight: normal; margin-left: 12px;"></span>
             <a href="https://www.coinglass.com/zh" target="_blank" rel="noopener noreferrer"
-                style="font-size: 0.75rem; color: #f7931a; font-weight: normal; margin-left: 12px; text-decoration: none; border: 1px solid #f7931a33; padding: 2px 8px; border-radius: 4px;">
+                style="font-size: 0.75rem; color: var(--accent-btc); font-weight: normal; margin-left: 12px; text-decoration: none; border: 1px solid color-mix(in srgb, var(--accent-btc) 25%, transparent); padding: 2px 8px; border-radius: 4px;">
                 CoinGlass 完整数据 ↗
             </a>
         </h2>
         <div class="news-card" id="derivativesPanel">
-            <p style="color: #888;">加载中...</p>
+            <p style="color: var(--text-muted);">加载中...</p>
         </div>
     </section>
 
@@ -419,16 +436,16 @@
         <h2 class="section-title">
             <span class="icon">🏦</span>
             交易所BTC余额
-            <span style="font-size: 0.75rem; color: #888; font-weight: normal; margin-left: 10px;">mempool.space
+            <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal; margin-left: 10px;">mempool.space
                 链上冷钱包余额监控</span>
             <a href="https://www.coinglass.com/zh/Balance" target="_blank" rel="noopener noreferrer"
-                style="font-size: 0.75rem; color: #f7931a; font-weight: normal; margin-left: 12px; text-decoration: none; border: 1px solid #f7931a33; padding: 2px 8px; border-radius: 4px;">
+                style="font-size: 0.75rem; color: var(--accent-btc); font-weight: normal; margin-left: 12px; text-decoration: none; border: 1px solid color-mix(in srgb, var(--accent-btc) 25%, transparent); padding: 2px 8px; border-radius: 4px;">
                 CoinGlass 交易所BTC余额 ↗
             </a>
         </h2>
         <div class="exchange-balance-card-standalone">
             <div id="exchangeBalance">
-                <p style="color: #888;">加载中...</p>
+                <p style="color: var(--text-muted);">加载中...</p>
             </div>
         </div>
     </section>
@@ -447,44 +464,44 @@
 
                 <!-- 宏观经济日历 -->
                 <div class="news-card calendar-card">
-                    <h3 style="color: #f79322; margin-bottom: 15px; font-size: 1.1rem; flex-shrink: 0;">
+                    <h3 style="color: var(--accent-btc); margin-bottom: 15px; font-size: 1.1rem; flex-shrink: 0;">
                         🏦 宏观经济日历
-                        <span style="font-size: 0.8rem; color: #888; font-weight: normal; margin-left: 10px;">
+                        <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: normal; margin-left: 10px;">
                             CPI · 非农 · 利率决议
                         </span>
                     </h3>
                     <div id="macroCalendar" class="news-list" style="max-height: 260px; overflow-y: auto;">
-                        <p style="color: #888;">加载中...</p>
+                        <p style="color: var(--text-muted);">加载中...</p>
                     </div>
                 </div>
 
                 <!-- 巨鲸动态 -->
                 <div class="news-card whale-card">
-                    <h3 style="color: #f79322; margin-bottom: 10px; font-size: 1.1rem; flex-shrink: 0;">
+                    <h3 style="color: var(--accent-btc); margin-bottom: 10px; font-size: 1.1rem; flex-shrink: 0;">
                         🐋 巨鲸动态
                         <span
-                            style="font-size: 0.75rem; color: #888; font-weight: normal; display: block; margin-top: 3px;">Blockchain.com
+                            style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal; display: block; margin-top: 3px;">Blockchain.com
                             实时大额交易</span>
                     </h3>
                     <div id="whaleStats" class="whale-stats-container" style="flex-shrink: 0;">
                         <!-- JS 动态填充 -->
                     </div>
                     <div id="whaleActivity" class="news-list" style="max-height: 300px; overflow-y: auto; padding-right: 8px;">
-                        <p style="color: #888;">加载中...</p>
+                        <p style="color: var(--text-muted);">加载中...</p>
                     </div>
                 </div>
 
                 <!-- ETF 动态 -->
                 <div class="news-card" style="margin-top: 16px;">
-                    <h3 style="color: #f79322; margin-bottom: 10px; font-size: 1.1rem;">
+                    <h3 style="color: var(--accent-btc); margin-bottom: 10px; font-size: 1.1rem;">
                         📊 ETF 动态
                         <a href="https://coinmarketcap.com/etf/" target="_blank" rel="noopener noreferrer"
-                            style="font-size: 0.75rem; color: #f7931a; font-weight: normal; margin-left: 10px; text-decoration: none; border: 1px solid #f7931a33; padding: 2px 8px; border-radius: 4px;">
+                            style="font-size: 0.75rem; color: var(--accent-btc); font-weight: normal; margin-left: 10px; text-decoration: none; border: 1px solid color-mix(in srgb, var(--accent-btc) 25%, transparent); padding: 2px 8px; border-radius: 4px;">
                             CoinMarketCap ↗
                         </a>
                     </h3>
                     <div id="etfFlowPanel">
-                        <p style="color: #888; font-size: 0.85rem; line-height: 1.6;">
+                        <p style="color: var(--text-muted); font-size: 0.85rem; line-height: 1.6;">
                             点击上方链接查看 BTC ETF 实时资金流入流出、AUM 规模及各产品详情。
                         </p>
                     </div>
@@ -492,38 +509,38 @@
 
                 <!-- DAT 动态 -->
                 <div class="news-card" style="margin-top: 16px;">
-                    <h3 style="color: #f79322; margin-bottom: 12px; font-size: 1.1rem; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+                    <h3 style="color: var(--accent-btc); margin-bottom: 12px; font-size: 1.1rem; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
                         🏦 DAT 动态
                         <a href="https://bitcointreasuries.net/" target="_blank" rel="noopener noreferrer"
-                            style="font-size: 0.75rem; color: #f7931a; font-weight: normal; text-decoration: none; border: 1px solid #f7931a33; padding: 2px 8px; border-radius: 4px;">
+                            style="font-size: 0.75rem; color: var(--accent-btc); font-weight: normal; text-decoration: none; border: 1px solid color-mix(in srgb, var(--accent-btc) 25%, transparent); padding: 2px 8px; border-radius: 4px;">
                             实时追踪 ↗
                         </a>
                         <a href="https://saylortracker.com/" target="_blank" rel="noopener noreferrer"
-                            style="font-size: 0.75rem; color: #aaa; font-weight: normal; text-decoration: none; border: 1px solid #ffffff22; padding: 2px 8px; border-radius: 4px;">
+                            style="font-size: 0.75rem; color: var(--text-secondary); font-weight: normal; text-decoration: none; border: 1px solid var(--border-color); padding: 2px 8px; border-radius: 4px;">
                             Saylor ↗
                         </a>
                     </h3>
                     <!-- 主要财库公司持仓表（JS 用 CoinGecko 数据动态替换；API 失败保留此静态回退） -->
-                    <div id="datHoldings" style="font-size: 0.78rem; color: #bbb;">
+                    <div id="datHoldings" style="font-size: 0.78rem; color: var(--text-secondary);">
                         <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; align-items: center;">
                             <!-- Header -->
-                            <span style="color: #555; font-size: 0.7rem; padding-bottom: 4px; border-bottom: 1px solid #2a3040;">公司</span>
-                            <span style="color: #555; font-size: 0.7rem; padding-bottom: 4px; border-bottom: 1px solid #2a3040; text-align: right;">持仓 (BTC)</span>
-                            <span style="color: #555; font-size: 0.7rem; padding-bottom: 4px; border-bottom: 1px solid #2a3040; text-align: right;">代码</span>
+                            <span style="color: var(--text-muted); font-size: 0.7rem; padding-bottom: 4px; border-bottom: 1px solid var(--border-color);">公司</span>
+                            <span style="color: var(--text-muted); font-size: 0.7rem; padding-bottom: 4px; border-bottom: 1px solid var(--border-color); text-align: right;">持仓 (BTC)</span>
+                            <span style="color: var(--text-muted); font-size: 0.7rem; padding-bottom: 4px; border-bottom: 1px solid var(--border-color); text-align: right;">代码</span>
                             <!-- Rows -->
-                            <span>Strategy (MicroStrategy)</span><span style="text-align:right; color:#f7931a;">568,840</span><span style="text-align:right; color:#555;">MSTR</span>
-                            <span>Marathon Digital</span><span style="text-align:right; color:#f7931a;">47,531</span><span style="text-align:right; color:#555;">MARA</span>
-                            <span>Riot Platforms</span><span style="text-align:right; color:#f7931a;">19,223</span><span style="text-align:right; color:#555;">RIOT</span>
-                            <span>Metaplanet</span><span style="text-align:right; color:#f7931a;">4,206</span><span style="text-align:right; color:#555;">3350.T</span>
-                            <span>Tesla</span><span style="text-align:right; color:#f7931a;">9,720</span><span style="text-align:right; color:#555;">TSLA</span>
-                            <span>CleanSpark</span><span style="text-align:right; color:#f7931a;">11,177</span><span style="text-align:right; color:#555;">CLSK</span>
+                            <span>Strategy (MicroStrategy)</span><span style="text-align:right; color:var(--accent-btc);">568,840</span><span style="text-align:right; color:#555;">MSTR</span>
+                            <span>Marathon Digital</span><span style="text-align:right; color:var(--accent-btc);">47,531</span><span style="text-align:right; color:#555;">MARA</span>
+                            <span>Riot Platforms</span><span style="text-align:right; color:var(--accent-btc);">19,223</span><span style="text-align:right; color:#555;">RIOT</span>
+                            <span>Metaplanet</span><span style="text-align:right; color:var(--accent-btc);">4,206</span><span style="text-align:right; color:#555;">3350.T</span>
+                            <span>Tesla</span><span style="text-align:right; color:var(--accent-btc);">9,720</span><span style="text-align:right; color:#555;">TSLA</span>
+                            <span>CleanSpark</span><span style="text-align:right; color:var(--accent-btc);">11,177</span><span style="text-align:right; color:#555;">CLSK</span>
                         </div>
-                        <p style="margin: 10px 0 0; color: #444; font-size: 0.68rem; text-align: right;">
+                        <p style="margin: 10px 0 0; color: var(--text-muted); font-size: 0.68rem; text-align: right;">
                             静态参考数据（实时数据加载中），点击「实时追踪」查看最新增减仓动态
                         </p>
                     </div>
                     <!-- mNAV 动态区 -->
-                    <div id="datMNAV" style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #2a3040; font-size: 0.78rem; color: #888;">
+                    <div id="datMNAV" style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-color); font-size: 0.78rem; color: var(--text-muted);">
                         <span style="color:#555;">MSTR mNAV 加载中…</span>
                     </div>
                 </div>
@@ -534,13 +551,13 @@
             <div class="news-col-right">
                 <div class="news-card news-main-card">
                     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:15px; flex-shrink:0;">
-                        <h3 style="color: #f79322; font-size: 1.1rem; margin:0;">
+                        <h3 style="color: var(--accent-btc); font-size: 1.1rem; margin:0;">
                             📡 Block 资讯聚合
-                            <span style="font-size: 0.8rem; color: #888; font-weight: normal; margin-left: 10px;">
+                            <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: normal; margin-left: 10px;">
                                 律动 BlockBeats
                             </span>
                             <a href="https://www.theblockbeats.info/newsflash" target="_blank" rel="noopener noreferrer"
-                               style="font-size: 0.75rem; color: #f7931a; opacity: 0.7; margin-left: 10px; text-decoration: none; font-weight: normal;"
+                               style="font-size: 0.75rem; color: var(--accent-btc); opacity: 0.7; margin-left: 10px; text-decoration: none; font-weight: normal;"
                                title="在律动官网查看更多资讯">↗ 律动官网</a>
                             <a href="https://x.com/i/lists/1479657282585923588" target="_blank" rel="noopener noreferrer"
                                style="font-size: 0.75rem; color: #1d9bf0; opacity: 0.8; margin-left: 8px; text-decoration: none; font-weight: normal;"
@@ -555,7 +572,7 @@
                         </div>
                     </div>
                     <div id="cryptoNews" class="news-list" style="flex: 1; min-height: 0; overflow-y: auto; padding-right: 10px;">
-                        <p style="color: #888;">加载中...</p>
+                        <p style="color: var(--text-muted);">加载中...</p>
                     </div>
                 </div>
             </div>
@@ -628,8 +645,8 @@
         <h2 class="section-title">
             <span class="icon">⚙️</span>
             Bitcoin 开发者动态
-            <span style="font-size: 0.75rem; color: #888; font-weight: normal; margin-left: 10px;">Optech · Delving Bitcoin · Dev Mailing List · Blockstream</span>
-            <span id="buildersUpdatedAt" style="font-size: 0.72rem; color: #555; font-weight: normal; margin-left: 12px;"></span>
+            <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal; margin-left: 10px;">Optech · Delving Bitcoin · Dev Mailing List · Blockstream</span>
+            <span id="buildersUpdatedAt" style="font-size: 0.72rem; color: var(--text-muted); font-weight: normal; margin-left: 12px;"></span>
             <button id="buildersRefreshBtn" class="builders-refresh-btn" title="重新拉取 RSS 并生成摘要">⟳</button>
         </h2>
 
@@ -647,7 +664,7 @@
         </details>
 
         <div class="builders-grid" id="buildersGrid">
-            <p style="color: #888; font-size: 0.9rem;">加载中...</p>
+            <p style="color: var(--text-muted); font-size: 0.9rem;">加载中...</p>
         </div>
     </section>
 
@@ -836,16 +853,16 @@
 
     <!-- ETH 收款地址 -->
     <div style="margin: 40px 20px 20px; padding: 20px; background: rgba(98, 126, 234, 0.08); border: 1px solid rgba(98, 126, 234, 0.25); border-radius: 12px; text-align: center;">
-        <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #888;">
+        <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: var(--text-muted);">
             ☕ 如果觉得有帮助，欢迎打赏 ETH
         </p>
         <code id="ethAddress"
-            style="display: inline-block; padding: 8px 16px; background: rgba(255,255,255,0.05); border-radius: 8px; font-size: 0.85rem; color: #627eea; letter-spacing: 0.3px; cursor: pointer; word-break: break-all; border: 1px solid rgba(98,126,234,0.2); transition: all 0.2s;"
+            style="display: inline-block; padding: 8px 16px; background: var(--bg-glass); border-radius: 8px; font-size: 0.85rem; color: #627eea; letter-spacing: 0.3px; cursor: pointer; word-break: break-all; border: 1px solid rgba(98,126,234,0.2); transition: all 0.2s;"
             onclick="navigator.clipboard.writeText('0x46f9ecf6256724bd37beeb8112c2765114301b8e').then(()=>{this.style.borderColor='#4ade80';this.style.color='#4ade80';this.textContent='✅ 已复制!';setTimeout(()=>{this.style.borderColor='';this.style.color='';this.textContent='0x46f9ecf6256724bd37beeb8112c2765114301b8e'},2000)})">0x46f9ecf6256724bd37beeb8112c2765114301b8e</code>
-        <p style="margin: 6px 0 0 0; font-size: 0.75rem; color: #666;">点击地址即可复制</p>
+        <p style="margin: 6px 0 0 0; font-size: 0.75rem; color: var(--text-muted);">点击地址即可复制</p>
     </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}?v=compass-3"></script>
+    <script src="{{ url_for('static', filename='script.js') }}?v=compass-6"></script>
 </body>
 
 </html>

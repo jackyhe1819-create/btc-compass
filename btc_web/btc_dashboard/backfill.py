@@ -508,8 +508,8 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
         if not np.isnan(pct_b.loc[ts]):
             inds["布林带"] = _stub("布林带", _band_bb(pct_b.loc[ts]))
 
-        cycle, _ = _compute_bucket_scores(CYCLE_BUCKETS, inds)
-        tactical, _ = _compute_bucket_scores(TACTICAL_BUCKETS, inds)
+        cycle, _, cycle_cov = _compute_bucket_scores(CYCLE_BUCKETS, inds)
+        tactical, _, tactical_cov = _compute_bucket_scores(TACTICAL_BUCKETS, inds)
 
         entries.append({
             "date": d,
@@ -518,6 +518,8 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
             "total_score": round(float(cycle), 4),
             "recommendation": cycle_recommendation(cycle),
             "tactical_score": round(float(tactical), 4),
+            "cycle_coverage": round(float(cycle_cov), 3),
+            "tactical_coverage": round(float(tactical_cov), 3),
             "scores": {n: i.score for n, i in inds.items()},
             "statuses": {},
             "backfilled": True,
