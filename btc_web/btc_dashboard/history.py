@@ -814,22 +814,34 @@ def _fetch_cm_history(days: int):
 
 
 def _fetch_bd_history(metric: str, field: str, days: int):
-    """bitcoin-data.com 范围端点 → (dates, values) 或 ([], [])"""
-    start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
-    end = datetime.now().strftime("%Y-%m-%d")
-    try:
+    """
+    bitcoin-data.com 范围端点 → (dates, values) 或 ([], [])。
+    ⚠️ 必须走 _cached_onchain (6h 缓存 + 30min 负缓存): 该函数被 runner 的
+    sparkline 每轮仪表盘刷新调用, 无缓存时 5 分钟一刷 = 12 req/h, 单独就打爆
+    bitcoin-data 匿名 10 req/h 限额, 反过来锁死 _bd_last 指标链路——现网
+    STH成本线/SOPR 长期"数据源暂不可用"的根因 (2026-07 对抗性审查修复)。
+    """
+    from .indicators_v2 import _cached_onchain
+
+    def _fetch():
+        start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
+        end = datetime.now().strftime("%Y-%m-%d")
         r = requests.get(f"https://bitcoin-data.com/v1/{metric}",
                          params={"startday": start, "endday": end},
                          timeout=15, headers=_BD_HEADERS)
         if r.status_code != 200:
-            return [], []
+            return None
         rows = sorted(r.json(), key=lambda x: x["d"])[-days:]
         dates = [row["d"] for row in rows]
         values = [round(float(row[field]), 4) for row in rows]
-        return dates, values
+        return (dates, values) if dates else None
+
+    try:
+        res = _cached_onchain(f"bdhist-{metric}-{days}", _fetch)
     except Exception as e:
         print(f"⚠️ bitcoin-data {metric} history 失败: {e}")
-        return [], []
+        res = None
+    return res if res else ([], [])
 
 
 def _clean_nans(dates, values):

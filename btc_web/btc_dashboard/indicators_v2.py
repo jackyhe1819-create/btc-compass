@@ -162,24 +162,29 @@ def calc_stablecoin_growth() -> IndicatorResult:
     growth_pct = (latest / prev_30d - 1) * 100 if prev_30d > 0 else 0.0
     total_b = latest / 1e9
 
-    if growth_pct > 2.5:
-        score, color, label = 1, "🟢", "弹药快速涌入"
-    elif growth_pct > 1.0:
-        score, color, label = 0.5, "🟢", "温和流入"
-    elif growth_pct > -1.0:
-        score, color, label = 0, "🟡", "基本持平"
-    elif growth_pct > -2.5:
-        score, color, label = -0.5, "🟠", "资金流出"
+    # 2026-07 对抗性审查重标定: 稳定币市值有结构性增长趋势 (2021+ 30日增速中位
+    # +2.0%), 旧阈值以 0% 为中性锚 → 60% 天数常驻看多票。新阈值 = 2021+ 分布
+    # 10/25/75/90 分位取整 (-2.0/-0.5/+5.5/+12), "常态增长"归 0 分, 只有显著
+    # 偏离常态才计分 (与交易所余额 v2 同法)。
+    if growth_pct > 12.0:
+        score, color, label = 1, "🟢", "弹药涌入远超常态"
+    elif growth_pct > 5.5:
+        score, color, label = 0.5, "🟢", "流入偏强"
+    elif growth_pct > -0.5:
+        score, color, label = 0, "🟡", "常态区间"
+    elif growth_pct > -2.0:
+        score, color, label = -0.5, "🟠", "罕见收缩"
     else:
-        score, color, label = -1, "🔴", "弹药快速撤离"
+        score, color, label = -1, "🔴", "弹药快速撤离 (历史前10%)"
 
     return IndicatorResult(
         name="稳定币增速", value=round(growth_pct, 2), score=score, color=color,
         status=f"{label} (30日 {growth_pct:+.1f}% | 总量 ${total_b:.0f}B)",
         priority="P1",
         url="https://defillama.com/stablecoins",
-        description="稳定币（USDT/USDC 等）总市值是加密市场的场内购买力。30 日增速为正说明新资金进场，是 BTC 中期需求的领先代理。",
-        method="DefiLlama 全稳定币 peggedUSD 流通量，最新值 vs 30 天前的变化百分比。>+2.5% 强流入，<-2.5% 强流出。")
+        description="稳定币（USDT/USDC 等）总市值是加密市场的场内购买力。30 日增速相对常态（结构性 +2%/30d）的偏离，是 BTC 中期需求的领先代理。",
+        method="DefiLlama 全稳定币 peggedUSD 流通量 30 日变化。阈值 = 2021+ 分布 "
+               "10/25/75/90 分位 (-2.0/-0.5/+5.5/+12%), 常态增长不计分 (2026-07 重标定)。")
 
 
 def calc_futures_basis() -> IndicatorResult:
@@ -364,16 +369,20 @@ def calc_etf_net_flow() -> IndicatorResult:
     latest = data.get("latest") or {}
     latest_str = f"最新 {latest.get('date','')} {latest.get('total',0):+,.0f}M" if latest else ""
 
-    if sum_5d > 1000:
-        score, color, label = 1, "🟢", "强劲净流入"
-    elif sum_5d > 200:
-        score, color, label = 0.5, "🟢", "温和净流入"
-    elif sum_5d > -200:
-        score, color, label = 0, "🟡", "基本平衡"
-    elif sum_5d > -1000:
+    # 2026-07 对抗性审查重标定: 旧阈值 ±200M/±1000M 按 2024 年初量纲设定, 在
+    # 2025-26 年的 ETF 流量下"中性带"只覆盖 14% 天数、"强"档触发 39%——极值不再
+    # 稀有。新阈值 = 近 300 交易日 5 日合计分布 10/25/75/90 分位取整
+    # (-1300/-700/+900/+1700M, 不对称反映结构性净流入偏置)。
+    if sum_5d > 1700:
+        score, color, label = 1, "🟢", "强劲净流入 (前10%)"
+    elif sum_5d > 900:
+        score, color, label = 0.5, "🟢", "偏强净流入"
+    elif sum_5d > -700:
+        score, color, label = 0, "🟡", "常态区间"
+    elif sum_5d > -1300:
         score, color, label = -0.5, "🟠", "持续净流出"
     else:
-        score, color, label = -1, "🔴", "大幅净流出"
+        score, color, label = -1, "🔴", "大幅净流出 (前10%)"
 
     return IndicatorResult(
         name="ETF净流入", value=round(sum_5d, 1), score=score, color=color,
@@ -381,7 +390,8 @@ def calc_etf_net_flow() -> IndicatorResult:
         priority="P0",
         url="https://www.coinglass.com/bitcoin-etf",
         description="美国现货 BTC ETF 日度净流入（真实申赎数据，非成交量）。机构边际买卖力量的最直接观测窗口，对称打分：净流出同样给负分。",
-        method=f"近 5 个交易日净流入合计（百万美元）。>+$1B 强流入，<-$1B 强流出。数据源: {data.get('source','SoSoValue')}。")
+        method=f"近 5 个交易日净流入合计（百万美元）。阈值 = 近300交易日分布 10/25/75/90 分位 "
+               f"(-1300/-700/+900/+1700M, 2026-07 重标定)。数据源: {data.get('source','SoSoValue')}。")
 
 
 def calc_fear_greed_v2() -> IndicatorResult:
@@ -637,7 +647,10 @@ def calc_hash_ribbons() -> IndicatorResult:
     矿工投降(30下穿60)后的恢复上穿是历史胜率极高的买点信号
     """
     def _fetch():
-        r = requests.get("https://mempool.space/api/v1/mining/hashrate/3m",
+        # 6m 窗 (~181 点): 60 日 SMA 暖机后有效区 ~121 点 > 45, "上穿 ≤45 天 → +1"
+        # 规则才能完整落地 (3m 窗有效区仅 ~31 点, 32-45 天前的真实上穿结构性漏报,
+        # 且与 backfill/backtest 口径分裂 — 2026-07 复查修复)
+        r = requests.get("https://mempool.space/api/v1/mining/hashrate/6m",
                          timeout=12, headers=_HEADERS)
         if r.status_code != 200:
             return None
@@ -646,7 +659,7 @@ def calc_hash_ribbons() -> IndicatorResult:
             return None
         return [float(x["avgHashrate"]) for x in arr]
 
-    rates = _cached_onchain("hashrate-3m", _fetch)
+    rates = _cached_onchain("hashrate-6m", _fetch)
     if not rates:
         return IndicatorResult(
             name="Hash Ribbons", value=float('nan'), score=0, color="⚪",
@@ -657,10 +670,21 @@ def calc_hash_ribbons() -> IndicatorResult:
     s = pd.Series(rates)
     sma30 = s.rolling(30).mean()
     sma60 = s.rolling(60).mean()
-    above = (sma30 > sma60).fillna(False)
+    # 翻转扫描只在两条均线均有效的区间内进行 — 60 日窗未满的 NaN 段比较恒为
+    # False, 会把数据有效性边界误判成状态翻转: 90 天窗下有效区仅 ~31 个点,
+    # 伪翻转距今 ~31 天 ≤45, 曾把"算力扩张期"(+0.25) 误报成"矿工投降结束—
+    # 经典买点"(+1) (2026-07 对抗性审查修复)
+    valid = sma30.notna() & sma60.notna()
+    above = (sma30 > sma60)[valid]
+    if above.empty:
+        return IndicatorResult(
+            name="Hash Ribbons", value=float('nan'), score=0, color="⚪",
+            status="数据不足 (需 ≥60 天算力)", priority="P1",
+            url="https://charts.bitbo.io/hash-ribbons/",
+            description="算力 30/60 日均线交叉信号。", method="数据不足。")
 
     cur_above = bool(above.iloc[-1])
-    # 距最近一次状态翻转的天数
+    # 距最近一次状态翻转的天数 (仅在有效区间内; 窗口内无翻转 → None = 长期维持)
     flip_days = None
     for i in range(len(above) - 2, -1, -1):
         if bool(above.iloc[i]) != cur_above:
@@ -681,7 +705,7 @@ def calc_hash_ribbons() -> IndicatorResult:
         status=f"{label} | 30D/60D 差 {spread_pct:+.1f}%", priority="P1",
         url="https://charts.bitbo.io/hash-ribbons/",
         description="算力 30 日均线 vs 60 日均线：下穿 = 矿工投降（出清弱矿工），重新上穿 = 投降结束，历史上是胜率极高的买点确认信号。本质是买点指标，无对称卖出信号。",
-        method="mempool.space 90 天日度算力，SMA30 上穿 SMA60 且 45 天内 → +1；维持上方 +0.25；下方(投降中) -0.25。6h 缓存。")
+        method="mempool.space 180 天日度算力，SMA30 上穿 SMA60 且 45 天内 → +1；维持上方 +0.25；下方(投降中) -0.25。6h 缓存。")
 
 
 # ============================================================

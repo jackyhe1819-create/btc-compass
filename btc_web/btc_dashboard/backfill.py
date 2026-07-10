@@ -40,7 +40,11 @@ from .score_history import _load_history, _save_history
 _HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
             "Accept": "application/json"}
 _SRC_TTL = 7 * 24 * 3600   # 数据源磁盘缓存 7 天
-_MARKER = "score_history_backfilled.marker"
+# marker 带版本号: 回填口径修复后 bump 版本, 旧版本回填的条目被判定为污染数据,
+# 下次启动自动清除并按新口径重建 (真实快照永远保留)。
+# v2 (2026-07-10 对抗性审查修复): Pi Cycle 旧编码 / ETF 日期键 / MVRV-Z·NUPL·Puell 分位混合口径
+_MARKER = "score_history_backfilled.v2.marker"
+_OLD_MARKERS = ("score_history_backfilled.marker",)
 
 
 # ============================================================
@@ -169,12 +173,21 @@ def _fetch_stablecoins():
 
 
 def _fetch_etf_daily():
-    """SoSoValue ETF 日度净流入 → {date: 百万美元}"""
+    """
+    SoSoValue ETF 日度净流入 → {date: 百万美元}。
+    键必须用 iso 全日期: series 的 date 字段是前端图表用的 "MM-DD" 短标签,
+    直接当日期键会被 pd.Timestamp 解析成公元 1 年且跨年撞键 (2026-07 审查修复)。
+    """
     from .etf_flow import fetch_etf_flow_history
     data = fetch_etf_flow_history(limit=400)
     if not data or not data.get("series"):
         return None
-    return {row["date"]: float(row["total"]) for row in data["series"]}
+    out = {}
+    for row in data["series"]:
+        iso = row.get("iso")
+        if iso and row.get("total") is not None:
+            out[iso] = float(row["total"])
+    return out or None
 
 
 def _fetch_hashrate_1y():
@@ -240,10 +253,12 @@ def _band_funding7d(pct):
     return -1 if pct > 0.05 else -0.5 if pct > 0.02 else 0 if pct > -0.02 else 0.5 if pct > -0.05 else 1
 
 def _band_etf_5d(m):
-    return 1 if m > 1000 else 0.5 if m > 200 else 0 if m > -200 else -0.5 if m > -1000 else -1
+    # 2026-07 重标定: 近300交易日 5日合计分布 10/25/75/90 分位 (calc_etf_net_flow 同阈值)
+    return 1 if m > 1700 else 0.5 if m > 900 else 0 if m > -700 else -0.5 if m > -1300 else -1
 
 def _band_stable_growth(pct):
-    return 1 if pct > 2.5 else 0.5 if pct > 1.0 else 0 if pct > -1.0 else -0.5 if pct > -2.5 else -1
+    # 2026-07 重标定: 2021+ 30日增速分布 10/25/75/90 分位 (calc_stablecoin_growth 同阈值)
+    return 1 if pct > 12.0 else 0.5 if pct > 5.5 else 0 if pct > -0.5 else -0.5 if pct > -2.0 else -1
 
 def _band_halving(months):
     return 1 if months <= 12 else 0 if months <= 24 else -1
@@ -287,21 +302,47 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
         "sopr":   _cached_fetch(cache_dir, "sopr", lambda: _fetch_bd_series("sopr", "sopr", days)),
         "fng":    _cached_fetch(cache_dir, "fng", _fetch_fng),
         "stable": _cached_fetch(cache_dir, "stablecoins", _fetch_stablecoins),
-        "etf":    _cached_fetch(cache_dir, "etf-daily", _fetch_etf_daily),
+        "etf":    _cached_fetch(cache_dir, "etf-daily-v2", _fetch_etf_daily),  # v2: iso 全日期键
         "hash":   _cached_fetch(cache_dir, "hashrate-1y", _fetch_hashrate_1y),
         "fund":   _cached_fetch(cache_dir, "funding-history", _fetch_funding_history),
         "mvrv": None, "nupl": None, "puell": None,   # 下方由 CM 派生或 bd 兜底
     }
 
     # ── CM 派生: MVRV-Z / NUPL / Puell / 交易所余额Δ30 / 净流7d (与 backtest 同公式) ──
+    # 2026-07 审查修复: MVRV-Z/NUPL/Puell 改为与现网 _pct_floor_score 同口径的
+    # "4年分位为主 + 绝对阈值极值保底" 混合评分 (旧版只有纯绝对阈值, 与实时口径漂移)。
+    # 分位/保底两条腿与 backtest/factors.py 完全同源:
+    #   MVRV-Z: 分位腿=rolling(730)σ 派生序列, 保底腿=全历史扩张σ 绝对阈值
+    #   NUPL / Puell: 分位腿与保底腿同一序列
     exch30 = netflow7 = None
+    mvrvz_sc = nupl_sc = puell_sc = None   # 预合成的逐日评分 {date: score}
     cm_price_s = None
+
+    def _rolling_pct_score(series: pd.Series) -> pd.Series:
+        """复刻 scoring._percentile_score 的滚动 4 年分位评分 (点时序, 无前视)"""
+        s = series.dropna()
+        if s.empty:
+            return pd.Series(np.nan, index=series.index)
+        minp = PERCENTILE_WINDOW // 4
+        r = s.rolling(PERCENTILE_WINDOW, min_periods=minp).rank(method="min")
+        n = s.rolling(PERCENTILE_WINDOW, min_periods=minp).count()
+        return ((0.5 - (r - 1) / n) * 2).reindex(series.index)
+
+    def _extreme_combine(pct: pd.Series, abs_: pd.Series) -> pd.Series:
+        """复刻 indicators_v2._pct_floor_score: 分位为主, 绝对阈值做极值保底"""
+        out = pct.copy()
+        both = pct.notna() & abs_.notna()
+        use_abs = both & (abs_.abs() > pct.abs())
+        out[use_abs] = abs_[use_abs]
+        return out.where(pct.notna(), abs_)
+
     if cm:
         cm_idx = pd.to_datetime(cm["dates"])
         mc = pd.Series(cm["mcap"], index=cm_idx, dtype=float)
         mvr = pd.Series(cm["mvrv"], index=cm_idx, dtype=float).replace(0, np.nan)
         rc = mc / mvr
         z_s = (mc - rc) / mc.expanding(min_periods=365).std()
+        z730_s = (mc - rc) / mc.rolling(730).std()
         nupl_s = 1 - 1 / mvr
         iss = pd.Series(cm["iss"], index=cm_idx, dtype=float)
         puell_s = iss / iss.rolling(365).mean()
@@ -314,19 +355,28 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
             sub = s.tail(n).dropna()
             return {ts.strftime("%Y-%m-%d"): float(v) for ts, v in sub.items()} or None
 
-        src["mvrv"] = _tail_dict(z_s)
-        src["nupl"] = _tail_dict(nupl_s)
-        src["puell"] = _tail_dict(puell_s)
+        mvrvz_sc = _tail_dict(_extreme_combine(
+            _rolling_pct_score(z730_s),
+            z_s.map(_band_mvrv_z, na_action="ignore")))
+        nupl_sc = _tail_dict(_extreme_combine(
+            _rolling_pct_score(nupl_s),
+            nupl_s.map(_band_nupl, na_action="ignore")))
+        puell_sc = _tail_dict(_extreme_combine(
+            _rolling_pct_score(puell_s),
+            puell_s.map(_band_puell, na_action="ignore")))
         exch30 = _tail_dict(exch30_s)
         netflow7 = _tail_dict(netflow7_s)
         cm_price_s = pd.Series(cm["price"], index=cm_idx, dtype=float).dropna()
 
-    # CM 失败时回退 bitcoin-data 序列 (旧链路)
-    if src["mvrv"] is None:
+    # 按"预合成结果"逐指标回退 bitcoin-data 原始值序列 (旧链路, 90 天序列不足
+    # 4 年分位窗, 退化为纯绝对阈值近似 — 与实时口径有偏差, 仅作最后兜底)。
+    # 逐指标而非按 cm 整体判断: CM 可能 HTTP 成功但单列失效 (如 CapMVRVCur 停更
+    # → 该指标预合成为 None), 此时仍需列级兜底; CM 单列成功的指标不打 bd (限流)。
+    if mvrvz_sc is None:
         src["mvrv"] = _cached_fetch(cache_dir, "mvrv-zscore", lambda: _fetch_bd_series("mvrv-zscore", "mvrvZscore", days))
-    if src["nupl"] is None:
+    if nupl_sc is None:
         src["nupl"] = _cached_fetch(cache_dir, "nupl", lambda: _fetch_bd_series("nupl", "nupl", days))
-    if src["puell"] is None:
+    if puell_sc is None:
         src["puell"] = _cached_fetch(cache_dir, "puell-multiple", lambda: _fetch_bd_series("puell-multiple", "puellMultiple", days))
 
     ok = [k for k, v in src.items() if v] + (["cm"] if cm else [])
@@ -385,7 +435,11 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
 
     stable_s = pd.Series({pd.Timestamp(d): v for d, v in (src["stable"] or {}).items()}).sort_index()
     etf_s = pd.Series({pd.Timestamp(d): v for d, v in (src["etf"] or {}).items()}).sort_index()
-    etf_5d = etf_s.rolling(5).sum() if len(etf_s) else None
+    # 先按交易日 rolling(5) 再 reindex 到日历日 ffill(limit=4): 周末/假日沿用最近
+    # 5 个交易日合计, 与实时 calc_etf_net_flow 及 backtest/factors.py 口径一致
+    # (旧版周末整天缺席, 每周 ~2/7 天数因子集与另两处分裂)
+    etf_5d = (etf_s.rolling(5).sum().reindex(df.index).ffill(limit=4)
+              if len(etf_s) else None)
 
     def _at(series_dict, d):
         return series_dict.get(d) if series_dict else None
@@ -414,18 +468,28 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
         if not np.isnan(ma111.loc[ts]) and not np.isnan(ma350.loc[ts]):
             ma350x2 = ma350.loc[ts] * 2
             gap = (ma350x2 - ma111.loc[ts]) / ma350x2 * 100
-            inds["Pi Cycle Top"] = _stub("Pi Cycle Top", -1 if gap <= 0 else 0 if gap <= 20 else 1)
+            # 顶部探测器三态 {0,-0.5,-1}: "远离交叉"是无信号(0)而非看多(+1)
+            # (与 indicators_long.calc_pi_cycle / backtest 2026-07 修复口径一致)
+            inds["Pi Cycle Top"] = _stub("Pi Cycle Top", -1 if gap <= 0 else -0.5 if gap <= 20 else 0)
 
-        # 链上筹码
-        z = _at(src["mvrv"], d)
-        if z is not None:
-            inds["MVRV-Z"] = _stub("MVRV-Z", _band_mvrv_z(z))
+        # 链上筹码 — 优先 CM 预合成的"分位为主+绝对保底"评分; CM 缺席退 bd 绝对阈值
+        zsc = _at(mvrvz_sc, d)
+        if zsc is not None:
+            inds["MVRV-Z"] = _stub("MVRV-Z", zsc)
+        else:
+            z = _at(src["mvrv"], d)
+            if z is not None:
+                inds["MVRV-Z"] = _stub("MVRV-Z", _band_mvrv_z(z))
         sth = _at(src["sth"], d)
         if sth and sth > 0:
             inds["STH成本线"] = _stub("STH成本线", _band_sth_ratio(price.loc[ts] / sth))
-        nu = _at(src["nupl"], d)
-        if nu is not None:
-            inds["NUPL"] = _stub("NUPL", _band_nupl(nu))
+        nsc = _at(nupl_sc, d)
+        if nsc is not None:
+            inds["NUPL"] = _stub("NUPL", nsc)
+        else:
+            nu = _at(src["nupl"], d)
+            if nu is not None:
+                inds["NUPL"] = _stub("NUPL", _band_nupl(nu))
         ex30 = _at(exch30, d)
         if ex30 is not None:
             inds["交易所余额"] = _stub("交易所余额", _band_exch_d30(ex30))
@@ -457,12 +521,20 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
             inds["趋势过滤器"] = _stub("趋势过滤器", tf)
 
         # 矿工经济
-        pl = _at(src["puell"], d)
-        if pl is not None:
-            inds["Puell Multiple"] = _stub("Puell Multiple", _band_puell(pl))
+        psc = _at(puell_sc, d)
+        if psc is not None:
+            inds["Puell Multiple"] = _stub("Puell Multiple", psc)
+        else:
+            pl = _at(src["puell"], d)
+            if pl is not None:
+                inds["Puell Multiple"] = _stub("Puell Multiple", _band_puell(pl))
         if hash_sma30 is not None and ts in hash_sma30.index and not np.isnan(hash_sma60.loc[ts]):
             above_h = hash_sma30.loc[ts] > hash_sma60.loc[ts]
-            sub = (hash_sma30.loc[:ts] > hash_sma60.loc[:ts])
+            # 翻转扫描只在两条均线均有效的区间内进行 — NaN 段(60日窗未满)会让
+            # 比较恒为 False, 把数据边界误判成状态翻转 (2026-07 审查修复)
+            h30, h60 = hash_sma30.loc[:ts], hash_sma60.loc[:ts]
+            valid = h30.notna() & h60.notna()
+            sub = (h30 > h60)[valid]
             flip_days = None
             arr = sub.values
             for i in range(len(arr) - 2, -1, -1):
@@ -531,19 +603,32 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
 def ensure_backfilled(cache_dir: str, days: int = 90) -> bool:
     """
     幂等回填入口 (app 启动线程调用)。
-    - marker 文件存在 → 跳过
-    - 成功 → 合并写入 score_history.json + 写 marker
+    - 当前版本 marker 存在 → 跳过
+    - 旧版本 marker 存在 → 判定历史中 backfilled 条目为旧口径污染数据,
+      **全部清除**后按新口径重建 (真实快照永远保留, 决策层滞回重放随之自愈)
+    - 成功 → 合并写入 score_history.json + 写新 marker + 清理旧 marker
     - 失败 → 抛异常, 由调用方稍后重试
     """
     marker = os.path.join(cache_dir, _MARKER)
     if os.path.exists(marker):
         return False
+    stale_rebuild = any(os.path.exists(os.path.join(cache_dir, m)) for m in _OLD_MARKERS)
+
+    existing = _load_history(cache_dir)
+    if stale_rebuild:
+        purged_dates = [e["date"] for e in existing if e.get("backfilled")]
+        existing = [e for e in existing if not e.get("backfilled")]
+        if purged_dates:
+            # 重建窗口扩到被清除条目的最早日期, 历史深度不因换版本单向缩水
+            # (决策滞回重放 REPLAY_DAYS=365 依赖这段深度)
+            span = (datetime.now() - datetime.strptime(min(purged_dates), "%Y-%m-%d")).days + 1
+            days = max(days, span)
+        print(f"🧹 检测到旧版本回填 marker: 清除 {len(purged_dates)} 条旧口径回填条目, "
+              f"按 v2 口径重建 {days} 天")
 
     new_entries = reconstruct(days, cache_dir)
     if not new_entries:
         raise RuntimeError("回填结果为空")
-
-    existing = _load_history(cache_dir)
     real_dates = {e["date"] for e in existing if not e.get("backfilled")}
     merged = {e["date"]: e for e in new_entries if e["date"] not in real_dates}
     for e in existing:
@@ -554,6 +639,11 @@ def ensure_backfilled(cache_dir: str, days: int = 90) -> bool:
 
     with open(marker, "w") as f:
         f.write(datetime.now().isoformat())
+    for m in _OLD_MARKERS:
+        try:
+            os.remove(os.path.join(cache_dir, m))
+        except OSError:
+            pass
     print(f"✅ 评分历史回填完成: 新增 {len(new_entries)} 天, 合计 {len(final)} 天")
     return True
 

@@ -60,7 +60,8 @@ def _fetch_sosovalue(limit: int = 15):
                 continue
             cum = it.get("cumNetInflow")
             rows.append({
-                "date": d.strftime("%m-%d"), "_sort": d,
+                # date 是前端图表短标签; iso 是完整日期 (回填等程序消费方用它, 勿删)
+                "date": d.strftime("%m-%d"), "iso": d.strftime("%Y-%m-%d"), "_sort": d,
                 "total": round(float(flow) / 1e6, 1),   # USD → 百万美元
                 "funds": {},
                 "cum": round(float(cum) / 1e6, 0) if cum is not None else None,
@@ -144,7 +145,8 @@ def _fetch_farside(limit: int = 15):
                 v = _parse_farside_value(str(row[c]))
                 if v is not None and v != 0:
                     funds[c] = v
-            rows.append({"date": d.strftime("%m-%d"), "_sort": d, "total": total, "funds": funds})
+            rows.append({"date": d.strftime("%m-%d"), "iso": d.strftime("%Y-%m-%d"),
+                         "_sort": d, "total": total, "funds": funds})
 
         if not rows:
             return None
@@ -190,8 +192,8 @@ def _fetch_coinglass(limit: int = 15):
                         d = datetime.strptime(str(ts)[:10], "%Y-%m-%d")
                     # CoinGlass 流向单位通常为 USD，转为百万美元对齐 Farside
                     flow_m = float(flow) / 1e6 if abs(float(flow)) > 1e5 else float(flow)
-                    rows.append({"date": d.strftime("%m-%d"), "_sort": d,
-                                 "total": round(flow_m, 1), "funds": {}})
+                    rows.append({"date": d.strftime("%m-%d"), "iso": d.strftime("%Y-%m-%d"),
+                                 "_sort": d, "total": round(flow_m, 1), "funds": {}})
                 except Exception:
                     continue
             if rows:

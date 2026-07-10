@@ -229,7 +229,7 @@ def fetch_whale_activity(min_btc: int = 10, limit: int = 50) -> list:
     - 主力数据源: mempool.space（国内可访问，响应快）
       1. 最新区块已确认大额交易（/api/block/{hash}/txs）
       2. 内存池最近未确认交易（/api/mempool/recent）
-    - 最终后备: 示例数据
+    - 全部失败: 返回单条"数据源暂不可用"状态行, 绝不伪造交易
     - 按时间排序，最新在前
     """
     whale_list = []
@@ -337,27 +337,20 @@ def fetch_whale_activity(min_btc: int = 10, limit: int = 50) -> list:
             except Exception:
                 pass
 
-    # ── 方法3: 示例数据兜底 ──────────────────────────────────────────
-    if len(whale_list) < 2:
-        now = datetime.now()
-        for sample in [
-            (1250.50, "🐋 巨鲸", "🐋", 5),
-            (520.25, "🔥 超大额", "🔥", 12),
-            (180.80, "💰 大额", "💰", 18),
-            (95.50, "📊 中额", "📊", 25),
-        ]:
-            btc_amt, tx_type, icon, mins_ago = sample
-            ts = (now - timedelta(minutes=mins_ago)).timestamp()
-            whale_list.append({
-                "amount": f"{btc_amt:,.2f} BTC",
-                "value_usd": f"${btc_amt * btc_price:,.0f}",
-                "hash": "示例...",
-                "time": (now - timedelta(minutes=mins_ago)).strftime("%m-%d %H:%M"),
-                "timestamp": ts,
-                "type": tx_type,
-                "icon": icon,
-                "url": "https://mempool.space"
-            })
+    # ── 数据源失败: 如实标注, 绝不生成虚构交易 ────────────────────────
+    # (旧版在此伪造 4 笔带假时间戳的"示例"交易混入实时面板, 2026-07 对抗性审查移除:
+    #  失败路径必须诚实, 用户无法从"示例..."哈希意识到整版数据是编的。
+    #  条件是"一笔都没有"——清淡时段恰有 1 笔真交易时数据源明明是响应的,
+    #  不能再挂"未响应"状态行)
+    if not whale_list:
+        whale_list.append({
+            "amount": "⚠️ 数据源暂不可用",
+            "value_usd": "mempool.space 未响应, 稍后自动重试",
+            "hash": "", "time": "",
+            "timestamp": 0,
+            "type": "状态", "icon": "⚪",
+            "url": "https://mempool.space"
+        })
 
     # 按时间排序（最新在前），移除内部字段
     whale_list.sort(key=lambda x: x.get("timestamp", 0), reverse=True)

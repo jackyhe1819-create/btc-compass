@@ -34,6 +34,8 @@ def _step_score(series: pd.Series, edges, scores) -> pd.Series:
     阶梯映射: edges 为升序阈值 [e1..ek], scores 长度 k+1。
     value < e1 → scores[0]; e1 <= value < e2 → scores[1]; ...; value >= ek → scores[k]
     NaN → NaN。
+    注: 值恰等于阈值时归高档 (side="right"), 与现网/backfill 的严格 > 链 (归低档)
+    在边缘点上开闭方向相反 — 连续值命中边缘概率为零, 差异测度为零, 不作对齐。
     """
     out = pd.Series(np.nan, index=series.index, dtype=float)
     mask = series.notna()
@@ -158,16 +160,18 @@ def cycle_factor_scores(cm: pd.DataFrame,
                                     [1, 0.5, 0, -0.5, -1])
 
     # ---- 资金流桶 ----
-    # ETF净流入: 近5个交易日合计(百万美元)   [calc_etf_net_flow 阈值]
+    # ETF净流入: 近5个交易日合计(百万美元)   [calc_etf_net_flow 阈值, 2026-07 重标定:
+    # 近300交易日分布 10/25/75/90 分位, 不对称反映结构性净流入偏置]
     etf_m = (etf / 1e6).rolling(5).sum()
     out["ETF净流入"] = _step_score(etf_m.reindex(idx).ffill(limit=4),
-                                   [-1000, -200, 200, 1000],
+                                   [-1300, -700, 900, 1700],
                                    [-1, -0.5, 0, 0.5, 1])
 
-    # 稳定币增速: 最新 vs 30 天前   [calc_stablecoin_growth 阈值]
+    # 稳定币增速: 最新 vs 30 天前   [calc_stablecoin_growth 阈值, 2026-07 重标定:
+    # 2021+ 分布 10/25/75/90 分位, 结构性增长 (~+2%/30d) 归入常态 0 分]
     st = stable.reindex(idx).ffill(limit=3)
     growth = (st / st.shift(30) - 1) * 100
-    out["稳定币增速"] = _step_score(growth, [-2.5, -1.0, 1.0, 2.5],
+    out["稳定币增速"] = _step_score(growth, [-2.0, -0.5, 5.5, 12.0],
                                     [-1, -0.5, 0, 0.5, 1])
 
     # ---- 趋势确认桶 ----   [calc_trend_filter]

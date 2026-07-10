@@ -681,14 +681,22 @@ def calc_company_holdings() -> IndicatorResult:
     - 数据源: CoinGecko
     """
     holdings, status_text = fetch_company_holdings_data()
-    
+
+    # API 失败时 fetch 返回 (0.0, "API 暂不可用") — 必须以 NaN 剔除,
+    # 不能带着 value=0.0 + 正分挂绿灯 (2026-07 对抗性审查修复: 幻觉分)
+    if not holdings or holdings <= 0:
+        return IndicatorResult(
+            name="公司持仓", value=float('nan'), score=0, color="⚪",
+            status=status_text or "API 暂不可用", priority="P2",
+            url="https://bitcointreasuries.net")
+
     # 评分: 持续增长为利好
     # 这里简单判断是否有数据
     if holdings > 300000:
         score, color = 1, "🟢"
     else:
         score, color = 0.5, "🟢"
-        
+
     return IndicatorResult(
         name="公司持仓",
         value=holdings,

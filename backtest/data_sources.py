@@ -144,47 +144,79 @@ def fetch_fng() -> pd.Series:
 
 
 # ------------------------------------------------------------
-# Binance 资金费率 (8h, 2019-09-10 起)
+# Binance 资金费率 (BTCUSDT 永续 8h, 2019-09-10 起)
+# fapi 对部分网络 451 地理封锁 → 走官方数据镜像 data.binance.vision
+# (S3 月度 CSV 包, 无地理限制; 与 bnb_compass/backtest 同方案, 2026-07 移植)
 # ------------------------------------------------------------
 
-def fetch_funding() -> pd.Series:
-    """返回 8 小时粒度资金费率序列 (index=结算时间, 值=费率小数)。增量缓存。"""
-    path = _cache_path("binance_funding.json")
+# 镜像实测不托管 2019-09..2019-12 月包 (fapi 时代覆盖 2019-09-10 起, 镜像只从
+# 2020-01 起), 起点按镜像实际覆盖设定, 避免每轮回测对 4 个死 URL 重复请求
+_FUNDING_START = pd.Timestamp("2020-01-01")
+
+
+def _fetch_funding_month(ym: str):
+    """下载并解析单月 fundingRate CSV 包。返回 [(ms, rate)], 404/失败返回 None。"""
+    import io as _io
+    import zipfile
+    url = ("https://data.binance.vision/data/futures/um/monthly/fundingRate/"
+           f"BTCUSDT/BTCUSDT-fundingRate-{ym}.zip")
+    r = requests.get(url, headers=_HEADERS, timeout=60)
+    if r.status_code != 200:
+        return None
+    with zipfile.ZipFile(_io.BytesIO(r.content)) as zf:
+        text = zf.read(zf.namelist()[0]).decode("utf-8")
     rows = []
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            rows = json.load(f)
-
-    start = int(rows[-1]["fundingTime"]) + 1 if rows else 1567296000000  # 2019-09-01
-    fetched = 0
-    while True:
+    for line in text.splitlines()[1:]:
+        parts = line.split(",")
+        if len(parts) < 3:
+            continue
         try:
-            r = requests.get("https://fapi.binance.com/fapi/v1/fundingRate",
-                             params={"symbol": "BTCUSDT", "startTime": start, "limit": 1000},
-                             headers=_HEADERS, timeout=30)
-            r.raise_for_status()
-            batch = r.json()
-        except Exception as e:
-            print(f"⚠️ Binance 资金费率分页失败 (已有 {len(rows)} 条): {e}")
-            break
-        if not batch:
-            break
-        rows.extend(batch)
-        fetched += len(batch)
-        start = int(batch[-1]["fundingTime"]) + 1
-        if len(batch) < 1000:
-            break
-        time.sleep(0.25)
+            rows.append((int(parts[0]), float(parts[2])))
+        except ValueError:
+            continue
+    return rows
 
-    if fetched:
-        tmp = path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(rows, f)
-        os.replace(tmp, path)
 
-    data = {pd.Timestamp(int(it["fundingTime"]), unit="ms"): float(it["fundingRate"])
-            for it in rows}
-    return pd.Series(data).sort_index()
+def fetch_funding() -> pd.Series:
+    """返回 8 小时粒度资金费率序列 (index=结算时间, 值=费率小数)。逐月落盘缓存。"""
+    month_dir = os.path.join(CACHE_DIR, "binance_funding_btc")
+    os.makedirs(month_dir, exist_ok=True)
+
+    # 当前月的月包要到月末后才发布 (永远 404), 只遍历到上个月;
+    # 序列尾部因此最多缺 ~31 天, 该段 资金费率(7d) 为 NaN 由重归一剔除 (报告口径已声明)
+    months = pd.period_range(_FUNDING_START, pd.Timestamp.now(), freq="M")[:-1]
+    all_rows = []
+    for p in months:
+        ym = str(p)  # YYYY-MM
+        path = os.path.join(month_dir, f"{ym}.json")
+        rows = None
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                rows = json.load(f)
+        else:
+            try:
+                rows = _fetch_funding_month(ym)
+            except Exception as e:
+                print(f"⚠️ 资金费率 {ym} 下载失败: {e}")
+                rows = None
+            if rows:
+                tmp = path + ".tmp"
+                with open(tmp, "w") as f:
+                    json.dump(rows, f)
+                os.replace(tmp, path)
+            time.sleep(0.15)
+        if rows:
+            all_rows.extend(rows)
+
+    if not all_rows:
+        print("⚠️ Binance 资金费率镜像不可用 (因子将全程缺失)")
+        # 必须带 DatetimeIndex: 裸空 Series 的 RangeIndex 在 factors 的
+        # index.normalize() 处会抛异常, 降级路径反而崩掉整个回测
+        return pd.Series(dtype=float, index=pd.DatetimeIndex([]))
+    data = {pd.Timestamp(ms, unit="ms"): rate for ms, rate in all_rows}
+    s = pd.Series(data).sort_index()
+    print(f"   资金费率序列截止 {s.index[-1].date()} (镜像月包滞后, 尾部缺当月)")
+    return s[~s.index.duplicated(keep="last")]
 
 
 # ------------------------------------------------------------
