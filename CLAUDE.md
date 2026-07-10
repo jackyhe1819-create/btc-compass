@@ -17,6 +17,20 @@
 | `btc_web/btc_dashboard/backfill.py` | 评分历史 90 天回填（幂等，app 启动线程自动执行） |
 | `btc_web/btc_dashboard/decision.py` | 量化决策引擎：周期分→目标仓位（滞回换档 δ=0.05/5天确认，防边界抖动）+ 战术分→执行节奏；分档回测统计读 `data/band_stats.json`（由 backtest 生成，改档位阈值后须重跑回测同步） |
 
+## 验证 (改完代码必跑)
+
+```bash
+python3 verify.py            # 冒烟测试 + 探测本地 5070
+python3 verify.py --live     # 冒烟测试 + 探测 Render 现网
+python3 verify.py --offline  # 只跑冒烟测试 (改纯逻辑时最快)
+```
+
+- `tests/test_consistency.py` 锁死档位阈值的**四处同步**(decision / scoring /
+  score_history / backtest·evaluate)与 band_stats.json、滞回参数的一致性 —
+  改阈值忘了同步会直接红
+- 运行时探针逐因子检查存活 (以 scoring 桶配置为准绳)、覆盖率、决策面板、
+  缓存新鲜度、评分历史深度;退出码 0/1, 可供 CI 或 agent loop 当反馈信号
+
 ## 注意事项
 
 - bitcoin-data.com 匿名限 **10 请求/小时**：链上指标走 6h 缓存 + 失败 30min 负缓存，不要绕过 `_cached_onchain` 直连
