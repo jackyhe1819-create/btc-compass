@@ -531,6 +531,23 @@ def api_score_history():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/cycle-events')
+def api_cycle_events():
+    """周期相位与历史大事件规律 (静态资产 + 动态相位; 事件 n=3~4 带混杂标注)"""
+    try:
+        from btc_dashboard.cycle_events import get_cycle_events
+        data = get_cycle_events()
+        if data is None:
+            return jsonify({"success": False, "error": "asset missing"}), 404
+        resp = jsonify({"success": True, **data})
+        resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=7200'
+        return resp
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/derivatives')
 def api_derivatives():
     """

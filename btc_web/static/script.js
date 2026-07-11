@@ -181,6 +181,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => fetchScoreHistory(_scoreHistoryDays), REFRESH_INTERVAL);
     setTimeout(fetchDerivativesData, 2500);
     setInterval(fetchDerivativesData, 10 * 60 * 1000); // 每 10 分钟刷新
+    setTimeout(fetchCycleEvents, 3000);
+    setInterval(fetchCycleEvents, 60 * 60 * 1000); // 周期相位慢变，每小时刷新
     window._compassBooted = true;
 
     // 评分历史天数切换
@@ -468,6 +470,87 @@ function renderDashboard(data) {
     // 渲染今日量化决策面板
     renderDecisionPanel(data.decision);
     renderTriggerLevels(data.trigger_levels);
+}
+
+// 周期相位与事件规律卡：60 分钟拉一次（数据慢变，与快照解耦）
+let _cycleEventsLoaded = false;
+async function fetchCycleEvents() {
+    try {
+        const res = await fetch('/api/cycle-events');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success) renderCycleEvents(data);
+    } catch (e) { /* 附属卡，静默失败 */ }
+}
+
+/**
+ * 周期相位与历史大事件规律（事件研究 C 层）。
+ * n=3~4，逐次列出 + 混杂标注，绝不包装成"规律信号"。
+ */
+function renderCycleEvents(a) {
+    const el = document.getElementById('cycleEventsCard');
+    if (!el || !a || !a.current) return;
+    el.style.display = '';
+
+    const cur = a.current;
+    const fmtPct = v => (v === null || v === undefined) ? '进行中'
+        : `<span style="color:${v >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'};">${v >= 0 ? '+' : ''}${v}%</span>`;
+
+    // 当前相位定位条
+    const windows = (cur.active_windows || []).map(w =>
+        `<span class="decision-stat-chip" style="background:#f0864a1a; color:#f0864a;">🎯 ${w}</span>`).join(' ');
+    const header = `
+        <div class="decision-card-title">🗓️ 周期相位与事件规律 <span class="decision-freq">n=3~4 · 周期叙事非信号</span></div>
+        <div style="font-size:0.82rem; color:var(--text-secondary); margin:4px 0 8px;">
+            当前：第 <b>${cur.cycle_no}</b> 周期 · 减半后 <b>${cur.months_since_halving}</b> 月 ·
+            距下次减半约 <b>${cur.days_to_next_halving_est}</b> 天
+        </div>
+        ${windows ? `<div style="margin-bottom:8px;">${windows}</div>` : ''}`;
+
+    // 减半相位地图（逐周期，高亮当前所处相位）
+    const curM = cur.months_since_halving;
+    const phaseRows = (a.cycle_phases || []).map(ph => {
+        const m = ph.phase.match(/(\d+)-(\d+)/);
+        const inPhase = m && curM >= +m[1] && curM < +m[2];
+        const cells = ph.cycles.map(c => {
+            const cls = c.partial ? 'muted' : (c.ret >= 0 ? 'pos' : 'neg');
+            return `<span class="decision-stat-chip ${cls}" title="第${c.cycle}周期${c.partial ? '（进行中）' : ` · 段内最大回撤 ${c.maxdd}%`}">C${c.cycle}: ${c.ret >= 0 ? '+' : ''}${c.ret}%</span>`;
+        }).join(' ');
+        return `<div style="padding:4px 0; ${inPhase ? 'background:#f0864a12; border-left:3px solid #f0864a; padding-left:8px; margin-left:-8px; border-radius:0 4px 4px 0;' : ''}">
+            <div style="font-size:0.76rem; color:${inPhase ? '#f0864a' : 'var(--text-muted)'}; font-weight:${inPhase ? '700' : '500'};">${inPhase ? '▶ ' : ''}${ph.phase}</div>
+            <div style="margin-top:3px;">${cells}</div>
+        </div>`;
+    }).join('');
+
+    // 事件表（世界杯/换主席/大选）
+    const evBlock = (name, ev) => {
+        if (!ev || !ev.rows || !ev.rows.length) return '';
+        const rows = ev.rows.map(r => {
+            const fwd = r.fwd365 !== null ? fmtPct(r.fwd365)
+                : (r.since_event !== undefined ? `${fmtPct(r.since_event)} <small>(至今)</small>` : '进行中');
+            return `<tr>
+                <td style="padding:2px 8px 2px 0; color:var(--text-secondary);">${r.label}</td>
+                <td style="padding:2px 8px 2px 0; color:var(--text-muted); font-size:0.72rem;">减半后 ${r.cycle_month}月</td>
+                <td style="padding:2px 8px 2px 0; text-align:right;">${fmtPct(r.drawdown_at_event)}<small style="color:var(--text-muted);"> 距前高</small></td>
+                <td style="padding:2px 0; text-align:right;">${fwd}<small style="color:var(--text-muted);"> +1y</small></td>
+            </tr>`;
+        }).join('');
+        return `
+            <div style="margin-top:10px;">
+                <div style="font-size:0.8rem; font-weight:600; color:var(--text-secondary);">${name} <span style="font-weight:400; color:var(--text-muted); font-size:0.72rem;">(n=${ev.rows.length})</span></div>
+                <table style="width:100%; border-collapse:collapse; font-size:0.78rem; margin-top:3px;">${rows}</table>
+                <div style="font-size:0.68rem; color:var(--text-muted); margin-top:4px; line-height:1.45;">⚠️ ${ev.note}</div>
+            </div>`;
+    };
+
+    const events = a.events || {};
+    el.innerHTML = header
+        + `<div style="font-size:0.78rem; font-weight:600; color:var(--text-secondary); margin-top:4px;">减半周期相位地图（逐周期，不平均）</div>`
+        + phaseRows
+        + evBlock('世界杯', events['世界杯'])
+        + evBlock('美联储换主席', events['美联储换主席'])
+        + evBlock('美国大选', events['美国大选'])
+        + `<div style="font-size:0.66rem; color:var(--text-muted); margin-top:8px; border-top:1px solid var(--border-color,#333); padding-top:6px;">${a.honest_note || ''}</div>`;
 }
 
 /**

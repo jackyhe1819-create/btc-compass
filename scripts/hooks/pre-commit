@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# BTC Compass · pre-commit 护栏
+# ─────────────────────────────────────────────────────────────
+# 作用: 提交前自动跑 `verify.py --offline` (冒烟测试: 档位阈值四处对账 /
+#       band_stats 同步 / 评分与滞回纯函数), 红了就拦下提交。
+# 触发: 每次 `git commit`, 且暂存区含 .py 或 band_stats.json 时。
+# 绕过: `git commit --no-verify`  (仅在你确知本次改动与评分无关时)。
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# 只在改动可能影响评分/配置时才跑; 纯文档/前端资源提交直接放行, 不打扰。
+STAGED="$(git diff --cached --name-only --diff-filter=ACMR || true)"
+if ! printf '%s\n' "$STAGED" | grep -qE '\.py$|band_stats\.json$'; then
+  echo "pre-commit: 本次未改 .py / band_stats.json, 跳过验证 ✅"
+  exit 0
+fi
+
+PY="${PYTHON:-python3}"
+
+echo "pre-commit: 跑 verify.py --offline (阈值对账 + band_stats 同步 + 纯函数冒烟)…"
+if "$PY" verify.py --offline; then
+  echo "pre-commit: ✅ 通过, 放行提交"
+  exit 0
+else
+  echo ""
+  echo "pre-commit: ❌ 验证失败, 已拦截提交。"
+  echo "  · 改了档位阈值/滞回? 先重跑回测同步 band_stats:"
+  echo "      cd backtest && python3 run_backtest.py"
+  echo "    再提交 (test_consistency 会校验四处同步一致)。"
+  echo "  · 确知本次改动与评分无关、想跳过: git commit --no-verify"
+  exit 1
+fi
