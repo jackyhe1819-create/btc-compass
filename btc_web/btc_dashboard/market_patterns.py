@@ -118,15 +118,32 @@ def _blackswan_block(b):
     }
 
 
+def _forward_risk_block(fr):
+    """前瞻风险登记册 (判断非统计): 灰犀牛/黑天鹅分组直接透传策展资产。"""
+    if not fr:
+        return None
+    return {
+        "title": "前瞻风险雷达 —— 未来可能的 (判断, 非回测)",
+        "near_term_focus": fr.get("near_term_focus"),
+        "gray_rhino": fr.get("gray_rhino", []),
+        "black_swan": fr.get("black_swan", []),
+        "macro_note": fr.get("macro_note"),
+        "secondary": fr.get("secondary", []),
+        "honest_note": fr.get("honest_note"),
+    }
+
+
 def get_market_patterns():
-    """返回三块; 任一资产缺失则该块为 None (前端跳过)。全缺返回 None。"""
+    """返回各块; 任一资产缺失则该块为 None (前端跳过)。全缺返回 None。"""
     f = _load("fomc_study.json")
     s = _load("seasonality_study.json")
     b = _load("blackswan_events.json")
+    fr = _load("forward_risk_register.json")
     blocks = {
         "rates": _rates_block(f),
         "seasonality": _seasonality_block(s),
         "blackswan": _blackswan_block(b),
+        "forward_risk": _forward_risk_block(fr),
     }
     if not any(blocks.values()):
         return None

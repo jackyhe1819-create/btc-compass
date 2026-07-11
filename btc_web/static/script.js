@@ -566,6 +566,45 @@ function renderMarketPatterns(d) {
         </div>`;
     }
 
+    // ── 前瞻风险雷达（判断，非统计；与历史黑天鹅表并列）──
+    if (d.forward_risk) {
+        const fr = d.forward_risk;
+        const roleBadge = role => {
+            const isEpi = role.includes('震中');
+            const isRefuge = role.includes('避风港') || role === '两可';
+            const c = isEpi ? neg : (isRefuge ? 'var(--accent-orange)' : mut);
+            const bg = isEpi ? '#ea394315' : '#f0864a15';
+            return `<span style="font-size:0.66rem;color:${c};background:${bg};padding:1px 5px;border-radius:3px;white-space:nowrap;">${isEpi ? '⚠震中' : (isRefuge ? '🛡两可' : role)}</span>`;
+        };
+        const probColor = p => (p.includes('高') ? neg : (p === '中' ? 'var(--accent-orange)' : mut));
+        const riskItem = r => `
+            <div style="padding:5px 0;border-bottom:1px dashed var(--border-color,#333);">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px;">
+                    <span style="font-size:0.8rem;color:var(--text-secondary);font-weight:600;">${r.name}</span>
+                    <span style="white-space:nowrap;">${roleBadge(r.btc_role)} <span style="font-size:0.68rem;color:${probColor(r.probability)};">概率${r.probability}</span></span>
+                </div>
+                <div style="font-size:0.72rem;color:var(--text-secondary);margin:2px 0;">${r.summary} <span style="color:${mut};">· ${r.horizon}</span></div>
+                <div style="font-size:0.68rem;color:${mut};line-height:1.45;">📊 ${r.fact}</div>
+                <div style="font-size:0.68rem;color:${mut};line-height:1.45;">💥 ${r.impact}</div>
+                <div style="font-size:0.68rem;color:var(--accent-orange);line-height:1.45;">👁 预警：${r.early_warning}</div>
+            </div>`;
+        html += `<div style="margin-top:14px;border-top:2px solid var(--accent-orange);padding-top:8px;">
+            <div style="font-size:0.82rem;font-weight:600;color:var(--text-secondary);">🔭 ${fr.title}</div>
+            <div style="font-size:0.7rem;color:${mut};margin:3px 0 6px;background:#f0864a10;padding:5px 7px;border-radius:4px;">🎯 近端重点：${fr.near_term_focus || ''}</div>
+            <div style="font-size:0.76rem;font-weight:600;color:var(--text-secondary);margin-top:6px;">🦏 灰犀牛（看得见、慢移动、终将逼近）</div>
+            ${fr.gray_rhino.map(riskItem).join('')}
+            <div style="font-size:0.76rem;font-weight:600;color:var(--text-secondary);margin-top:8px;">🦢 黑天鹅（突发、难预测）</div>
+            ${fr.black_swan.map(riskItem).join('')}
+            ${fr.macro_note ? `<div style="margin-top:8px;padding:6px 8px;background:#ea394310;border-radius:4px;">
+                <div style="font-size:0.78rem;font-weight:600;color:${neg};">➕ ${fr.macro_note.name} <span style="font-size:0.66rem;font-weight:400;">${roleBadge(fr.macro_note.btc_role)} 概率${fr.macro_note.probability}</span></div>
+                <div style="font-size:0.7rem;color:var(--text-secondary);margin-top:2px;">${fr.macro_note.summary}</div>
+                <div style="font-size:0.68rem;color:${mut};margin-top:2px;">📊 ${fr.macro_note.fact}</div>
+                <div style="font-size:0.68rem;color:var(--accent-orange);">👁 预警：${fr.macro_note.early_warning}</div></div>` : ''}
+            ${fr.secondary && fr.secondary.length ? `<div style="font-size:0.68rem;color:${mut};margin-top:6px;line-height:1.5;">次级/机制完整性：${fr.secondary.join('；')}</div>` : ''}
+            <div style="font-size:0.66rem;color:${mut};margin-top:6px;line-height:1.5;">⚠️ ${fr.honest_note || ''}</div>
+        </div>`;
+    }
+
     html += `<div style="font-size:0.66rem;color:${mut};margin-top:8px;border-top:1px solid var(--border-color,#333);padding-top:6px;">${d.honest_note || ''}</div>`;
     el.innerHTML = html;
 }
