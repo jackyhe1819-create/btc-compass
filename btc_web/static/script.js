@@ -183,6 +183,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(fetchDerivativesData, 10 * 60 * 1000); // 每 10 分钟刷新
     setTimeout(fetchCycleEvents, 3000);
     setInterval(fetchCycleEvents, 60 * 60 * 1000); // 周期相位慢变，每小时刷新
+    setTimeout(fetchRoadmap, 3300);
+    setInterval(fetchRoadmap, 60 * 60 * 1000); // 路线图慢变
     setTimeout(fetchMarketPatterns, 3500);
     setInterval(fetchMarketPatterns, 60 * 60 * 1000); // 市场规律慢变
     window._compassBooted = true;
@@ -483,6 +485,73 @@ async function fetchCycleEvents() {
         const data = await res.json();
         if (data.success) renderCycleEvents(data);
     } catch (e) { /* 附属卡，静默失败 */ }
+}
+
+// BTC 里程碑路线图：慢变，60 分钟拉一次
+async function fetchRoadmap() {
+    try {
+        const res = await fetch('/api/roadmap');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success) renderRoadmap(data);
+    } catch (e) { /* 附属卡，静默失败 */ }
+}
+
+/**
+ * BTC 里程碑路线图（事件研究 C 层）。分时代时间轴，减半为骨干，
+ * 历史实心 / 预定虚线 / 提案标注，插入"你在这里"当前减半位置标记。
+ */
+function renderRoadmap(d) {
+    const el = document.getElementById('roadmapCard');
+    if (!el || !d.eras) return;
+    el.style.display = '';
+    const mut = 'var(--text-muted)';
+    const catIcon = { '减半': '🟠', '协议': '⚙️', '市场': '📈', '监管': '⚖️', '机构': '🏛️', '黑天鹅': '🦢', '基础设施': '🔧' };
+    const certStyle = {
+        '历史': { dot: 'var(--accent-btc)', op: '1', badge: '' },
+        '预定': { dot: 'var(--accent-orange)', op: '0.9', badge: '<span style="font-size:0.62rem;color:var(--accent-orange);border:1px solid var(--accent-orange);border-radius:3px;padding:0 3px;margin-left:4px;">预定</span>' },
+        '提案': { dot: mut, op: '0.75', badge: '<span style="font-size:0.62rem;color:' + mut + ';border:1px dashed ' + mut + ';border-radius:3px;padding:0 3px;margin-left:4px;">提案·未定</span>' },
+        '估计': { dot: mut, op: '0.7', badge: '<span style="font-size:0.62rem;color:' + mut + ';border:1px dashed ' + mut + ';border-radius:3px;padding:0 3px;margin-left:4px;">估计</span>' },
+    };
+    const cur = d.current || {};
+
+    const milestoneRow = m => {
+        const cs = certStyle[m.certainty] || certStyle['历史'];
+        const isFuture = m.certainty === '提案' || m.certainty === '预定' || m.certainty === '估计';
+        return `
+        <div style="display:flex; gap:8px; opacity:${cs.op}; padding:3px 0;">
+            <div style="flex:0 0 62px; font-size:0.7rem; color:${mut}; text-align:right; padding-top:1px; font-variant-numeric:tabular-nums;">${m.date}</div>
+            <div style="flex:0 0 10px; display:flex; flex-direction:column; align-items:center; padding-top:4px;">
+                <div style="width:7px; height:7px; border-radius:50%; background:${cs.dot}; ${isFuture ? 'border:1.5px solid ' + cs.dot + '; background:transparent;' : ''}"></div>
+            </div>
+            <div style="flex:1;">
+                <div style="font-size:0.78rem; color:var(--text-secondary); font-weight:600;">${catIcon[m.category] || ''} ${m.name}${cs.badge}${m.price_context ? ` <span style="font-weight:400; color:${mut}; font-size:0.68rem;">${m.price_context}</span>` : ''}</div>
+                <div style="font-size:0.68rem; color:${mut}; line-height:1.45;">${m.significance}</div>
+            </div>
+        </div>`;
+    };
+
+    let html = `<div class="decision-card-title">🗺️ BTC 里程碑路线图 <span class="decision-freq">历史·预定·提案分级</span></div>`;
+    if (cur.note) {
+        html += `<div style="font-size:0.74rem; color:var(--text-secondary); margin:4px 0 8px; background:#f0b90b12; padding:5px 8px; border-radius:4px;">📍 ${cur.note}</div>`;
+    }
+
+    let insertedYouAreHere = false;
+    d.eras.forEach(era => {
+        const isFutureEra = era.milestones.every(m => m.certainty !== '历史');
+        if (isFutureEra && !insertedYouAreHere) {
+            html += `<div style="display:flex; align-items:center; gap:6px; margin:8px 0 4px;">
+                <div style="flex:0 0 62px;"></div>
+                <div style="flex:1; border-top:2px dashed var(--accent-green); position:relative; height:0;">
+                    <span style="position:absolute; top:-9px; left:4px; background:var(--panel-2,var(--panel,#1a1a1a)); color:var(--accent-green); font-size:0.7rem; font-weight:600; padding:0 6px;">▶ 你在这里 · 减半后 ${cur.months_since_halving} 月</span>
+                </div></div>`;
+            insertedYouAreHere = true;
+        }
+        html += `<div style="font-size:0.76rem; font-weight:600; color:${isFutureEra ? 'var(--accent-orange)' : 'var(--text-secondary)'}; margin:8px 0 2px; border-left:3px solid ${isFutureEra ? 'var(--accent-orange)' : 'var(--accent-btc)'}; padding-left:6px;">${era.era} <span style="font-weight:400; color:${mut}; font-size:0.68rem;">${era.span}</span></div>`;
+        html += era.milestones.map(milestoneRow).join('');
+    });
+    html += `<div style="font-size:0.66rem; color:${mut}; margin-top:8px; border-top:1px solid var(--border-color,#333); padding-top:6px;">${d.honest_note || ''}</div>`;
+    el.innerHTML = html;
 }
 
 // 市场规律与风险版块：慢变，60 分钟拉一次

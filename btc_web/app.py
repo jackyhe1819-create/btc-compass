@@ -548,6 +548,23 @@ def api_cycle_events():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/roadmap')
+def api_roadmap():
+    """BTC 里程碑路线图 (历史/预定/提案分级 + 动态当前减半位置)"""
+    try:
+        from btc_dashboard.roadmap import get_roadmap
+        data = get_roadmap()
+        if data is None:
+            return jsonify({"success": False, "error": "asset missing"}), 404
+        resp = jsonify({"success": True, **data})
+        resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=7200'
+        return resp
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/market-patterns')
 def api_market_patterns():
     """市场规律与风险 (利率×周期证伪 + 季节性证伪 + 黑天鹅画像; 均非交易信号)"""
