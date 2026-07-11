@@ -183,6 +183,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(fetchDerivativesData, 10 * 60 * 1000); // 每 10 分钟刷新
     setTimeout(fetchCycleEvents, 3000);
     setInterval(fetchCycleEvents, 60 * 60 * 1000); // 周期相位慢变，每小时刷新
+    setTimeout(fetchMarketPatterns, 3500);
+    setInterval(fetchMarketPatterns, 60 * 60 * 1000); // 市场规律慢变
     window._compassBooted = true;
 
     // 评分历史天数切换
@@ -481,6 +483,91 @@ async function fetchCycleEvents() {
         const data = await res.json();
         if (data.success) renderCycleEvents(data);
     } catch (e) { /* 附属卡，静默失败 */ }
+}
+
+// 市场规律与风险版块：慢变，60 分钟拉一次
+async function fetchMarketPatterns() {
+    try {
+        const res = await fetch('/api/market-patterns');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success) renderMarketPatterns(data);
+    } catch (e) { /* 附属卡，静默失败 */ }
+}
+
+/**
+ * 市场规律与风险（事件研究 C 层）：利率×周期证伪 + 季节性证伪 + 黑天鹅画像。
+ * 全部经对抗核实。证伪类明确"民间规律不显著"，黑天鹅"n=1 仅风险画像"，非交易信号。
+ */
+function renderMarketPatterns(d) {
+    const el = document.getElementById('marketPatternsCard');
+    if (!el) return;
+    el.style.display = '';
+    const pos = 'var(--accent-green)', neg = 'var(--accent-red)', mut = 'var(--text-muted)';
+    const sign = v => `<span style="color:${v >= 0 ? pos : neg};">${v >= 0 ? '+' : ''}${v}%</span>`;
+    let html = `<div class="decision-card-title">🧭 市场规律与风险 <span class="decision-freq">对抗核实 · 非交易信号</span></div>`;
+
+    // ── 利率 × 周期证伪 ──
+    if (d.rates) {
+        const r = d.rates;
+        const pairs = r.natural_experiment.pairs.map(p =>
+            `<tr><td style="padding:1px 8px 1px 0;color:var(--text-secondary);">${p.date} ${p.bp}bp</td>
+             <td style="padding:1px 8px 1px 0;color:${mut};font-size:0.72rem;">减半后${p.cycle_year}年</td>
+             <td style="padding:1px 0;text-align:right;">后90天 ${sign(p.fwd90)}</td></tr>`).join('');
+        html += `<div style="margin-top:6px;">
+            <div style="font-size:0.82rem;font-weight:600;color:var(--text-secondary);">📉 ${r.title}</div>
+            <div style="font-size:0.72rem;color:${mut};margin:3px 0;">同样是降息，2024 与 2025 结果相反——由周期相位而非政策驱动：</div>
+            <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">${pairs}</table>
+            <div style="font-size:0.72rem;color:var(--text-secondary);margin-top:5px;">
+                ${r.groups.map(g => `${g.name} n=${g.n}：后30天中位 ${sign(g.median)}、胜率 ${g.win}%（基线 ${g.baseline_win}%，p=${g.p} 不显著）`).join('　·　')}</div>
+            <div style="font-size:0.68rem;color:${mut};margin-top:4px;line-height:1.45;">⚠️ ${r.verdict}</div>
+        </div>`;
+    }
+
+    // ── 季节性证伪 ──
+    if (d.seasonality) {
+        const s = d.seasonality;
+        const rows = s.items.map(it => {
+            const ok = it.p < 0.05;
+            return `<tr>
+                <td style="padding:2px 8px 2px 0;color:var(--text-secondary);">${it.name}</td>
+                <td style="padding:2px 8px 2px 0;color:${mut};font-size:0.72rem;">${it.claim}</td>
+                <td style="padding:2px 8px 2px 0;text-align:right;color:${mut};font-size:0.72rem;">p=${it.p}</td>
+                <td style="padding:2px 0;text-align:right;color:${ok ? pos : neg};font-size:0.74rem;">${ok ? '✓' : '✗'} ${it.verdict}</td></tr>`;
+        }).join('');
+        html += `<div style="margin-top:12px;border-top:1px dashed var(--border-color,#333);padding-top:8px;">
+            <div style="font-size:0.82rem;font-weight:600;color:var(--text-secondary);">🗓️ ${s.title}</div>
+            <table style="width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:3px;">${rows}</table>
+            <div style="font-size:0.68rem;color:${mut};margin-top:4px;line-height:1.45;">⚠️ ${s.verdict}</div>
+        </div>`;
+    }
+
+    // ── 黑天鹅画像 ──
+    if (d.blackswan) {
+        const b = d.blackswan;
+        const rows = b.events.map(e => {
+            const rec = e.recovery_days !== null ? `${e.recovery_days}天` : '未收复';
+            const f365 = e.fwd365 !== null ? sign(e.fwd365) : (e.since !== null && e.since !== undefined ? `${sign(e.since)}<small>*</small>` : '—');
+            const bear = e.cycle_month >= 18 && e.cycle_month <= 30;
+            return `<tr style="${bear ? 'background:#ea394312;' : ''}">
+                <td style="padding:2px 6px 2px 0;color:var(--text-secondary);white-space:nowrap;">${bear ? '🐻' : ''}${e.name}</td>
+                <td style="padding:2px 6px 2px 0;color:${mut};font-size:0.7rem;">减半后${Math.round(e.cycle_month)}m</td>
+                <td style="padding:2px 6px 2px 0;text-align:right;">${sign(e.dd_from_high)}<small style="color:${mut};">高</small></td>
+                <td style="padding:2px 6px 2px 0;text-align:right;color:${mut};font-size:0.72rem;">${rec}</td>
+                <td style="padding:2px 0;text-align:right;">${f365}<small style="color:${mut};">1y</small></td></tr>`;
+        }).join('');
+        const cnt = b.summary.counter_example;
+        html += `<div style="margin-top:12px;border-top:1px dashed var(--border-color,#333);padding-top:8px;">
+            <div style="font-size:0.82rem;font-weight:600;color:var(--text-secondary);">🦢 ${b.title}</div>
+            <div style="font-size:0.7rem;color:${mut};margin:2px 0;">🐻=熊市扎堆（减半后18-30月，反身性）·「高」=相对前30日高点回撤·「1y」=一年后</div>
+            <table style="width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:2px;">${rows}</table>
+            ${cnt ? `<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:4px;">💡 逆势反例 <b>${cnt.name}</b>：${cnt.note}</div>` : ''}
+            <div style="font-size:0.68rem;color:${mut};margin-top:4px;line-height:1.45;">⚠️ ${b.verdict}</div>
+        </div>`;
+    }
+
+    html += `<div style="font-size:0.66rem;color:${mut};margin-top:8px;border-top:1px solid var(--border-color,#333);padding-top:6px;">${d.honest_note || ''}</div>`;
+    el.innerHTML = html;
 }
 
 /**

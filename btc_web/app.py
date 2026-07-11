@@ -548,6 +548,23 @@ def api_cycle_events():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/market-patterns')
+def api_market_patterns():
+    """市场规律与风险 (利率×周期证伪 + 季节性证伪 + 黑天鹅画像; 均非交易信号)"""
+    try:
+        from btc_dashboard.market_patterns import get_market_patterns
+        data = get_market_patterns()
+        if data is None:
+            return jsonify({"success": False, "error": "assets missing"}), 404
+        resp = jsonify({"success": True, **data})
+        resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=7200'
+        return resp
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/derivatives')
 def api_derivatives():
     """

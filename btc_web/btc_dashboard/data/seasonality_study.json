@@ -1,0 +1,284 @@
+{
+ "generated": "2026-07-11 18:57",
+ "window": "2010-07-18 → 2026-07-11",
+ "n_days": 5837,
+ "weekday": {
+  "per_day": [
+   {
+    "day": "周一",
+    "n": 834,
+    "mean_bp": 38.6,
+    "win": 54.9
+   },
+   {
+    "day": "周二",
+    "n": 834,
+    "mean_bp": 31.6,
+    "win": 52.2
+   },
+   {
+    "day": "周三",
+    "n": 834,
+    "mean_bp": 38.1,
+    "win": 53.7
+   },
+   {
+    "day": "周四",
+    "n": 834,
+    "mean_bp": 5.4,
+    "win": 49.6
+   },
+   {
+    "day": "周五",
+    "n": 834,
+    "mean_bp": 23.9,
+    "win": 54.3
+   },
+   {
+    "day": "周六",
+    "n": 834,
+    "mean_bp": 21.6,
+    "win": 55.4
+   },
+   {
+    "day": "周日",
+    "n": 833,
+    "mean_bp": 3.1,
+    "win": 50.2
+   }
+  ],
+  "p_any_weekday": 0.7179,
+  "weekend": {
+   "mean_bp": 12.3,
+   "n": 1667,
+   "diff_bp": -15.2,
+   "p": 0.2633
+  }
+ },
+ "month": {
+  "per_month": [
+   {
+    "month": "1月",
+    "n": 16,
+    "median_pct": 5.2,
+    "mean_pct": 8.7,
+    "win": 56.2,
+    "p_raw": 0.7008
+   },
+   {
+    "month": "2月",
+    "n": 16,
+    "median_pct": 11.7,
+    "mean_pct": 13.1,
+    "win": 68.8,
+    "p_raw": 0.9751
+   },
+   {
+    "month": "3月",
+    "n": 16,
+    "median_pct": -0.9,
+    "mean_pct": 10.1,
+    "win": 50.0,
+    "p_raw": 0.7946
+   },
+   {
+    "month": "4月",
+    "n": 16,
+    "median_pct": 10.0,
+    "mean_pct": 32.4,
+    "win": 68.8,
+    "p_raw": 0.1011
+   },
+   {
+    "month": "5月",
+    "n": 16,
+    "median_pct": 6.9,
+    "mean_pct": 17.5,
+    "win": 56.2,
+    "p_raw": 0.7464
+   },
+   {
+    "month": "6月",
+    "n": 16,
+    "median_pct": 2.0,
+    "mean_pct": 5.4,
+    "win": 56.2,
+    "p_raw": 0.489
+   },
+   {
+    "month": "7月",
+    "n": 16,
+    "median_pct": 8.8,
+    "mean_pct": 8.4,
+    "win": 68.8,
+    "p_raw": 0.6783
+   },
+   {
+    "month": "8月",
+    "n": 16,
+    "median_pct": -8.6,
+    "mean_pct": -1.8,
+    "win": 31.2,
+    "p_raw": 0.1718
+   },
+   {
+    "month": "9月",
+    "n": 16,
+    "median_pct": -2.4,
+    "mean_pct": -3.3,
+    "win": 43.8,
+    "p_raw": 0.1368
+   },
+   {
+    "month": "10月",
+    "n": 16,
+    "median_pct": 13.0,
+    "mean_pct": 26.5,
+    "win": 68.8,
+    "p_raw": 0.2512
+   },
+   {
+    "month": "11月",
+    "n": 16,
+    "median_pct": 8.5,
+    "mean_pct": 34.4,
+    "win": 62.5,
+    "p_raw": 0.0775
+   },
+   {
+    "month": "12月",
+    "n": 16,
+    "median_pct": 2.2,
+    "mean_pct": 10.1,
+    "win": 50.0,
+    "p_raw": 0.7921
+   }
+  ],
+  "p_family_wise": 0.7639,
+  "min_p_raw": 0.0775,
+  "sell_in_may": {
+   "summer_daily_bp": 14.6,
+   "winter_daily_bp": 31.8,
+   "diff_bp": -17.2,
+   "p": 0.1571
+  },
+  "cycle_confound": {
+   "5月": [
+    -1,
+    -1,
+    0,
+    1,
+    2,
+    3,
+    0,
+    1,
+    2,
+    0,
+    1,
+    2,
+    3,
+    0,
+    1,
+    2
+   ],
+   "9月": [
+    -1,
+    -1,
+    0,
+    1,
+    2,
+    0,
+    1,
+    2,
+    3,
+    0,
+    1,
+    2,
+    3,
+    0,
+    1,
+    2
+   ],
+   "10月": [
+    -1,
+    -1,
+    0,
+    1,
+    2,
+    0,
+    1,
+    2,
+    3,
+    0,
+    1,
+    2,
+    3,
+    0,
+    1,
+    2
+   ]
+  }
+ },
+ "turn_of_month": {
+  "tom_daily_bp": 38.6,
+  "n": 768,
+  "other_daily_bp": 20.8,
+  "diff_bp": 17.8,
+  "p": 0.3209
+ },
+ "tax_day": {
+  "n": 15,
+  "median_pct": 5.7,
+  "win": 73.3,
+  "mean_pct": 24.5,
+  "baseline_win": 56.1,
+  "baseline_median": 2.0,
+  "p_median": 0.4125,
+  "p_win": 0.1384,
+  "cycle_years": [
+   -1,
+   -1,
+   0,
+   1,
+   2,
+   3,
+   0,
+   1,
+   2,
+   3,
+   0,
+   1,
+   2,
+   3,
+   0
+  ]
+ },
+ "cny": {
+  "n": 16,
+  "median_pct": 6.8,
+  "win": 62.5,
+  "mean_pct": 8.1,
+  "baseline_win": 56.1,
+  "baseline_median": 2.0,
+  "p_median": 0.2626,
+  "p_win": 0.3994,
+  "cycle_years": [
+   -1,
+   -1,
+   0,
+   1,
+   2,
+   3,
+   0,
+   1,
+   2,
+   3,
+   0,
+   1,
+   2,
+   3,
+   0,
+   1
+  ]
+ }
+}
