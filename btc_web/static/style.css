@@ -2461,6 +2461,39 @@ body::before {
     margin-top: 2px;
 }
 
+/* 周期认知与风险版块 (patterns-section) — 与同级 body 层区块对齐边距 */
+.patterns-section { padding: 0 20px; }
+/* 桌面宽屏下限宽居中, 避免密集小字铺满 1400px 造成超长行 (每行~180字符→~110) */
+@media (min-width: 1024px) {
+    .patterns-section > .decision-card {
+        max-width: 1000px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+}
+/* 深度卡折叠头 (路线图/市场规律默认收起, 驯服页面长度) */
+.pattern-collapse { }
+.pattern-summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+.pattern-summary::-webkit-details-marker { display: none; }
+.pattern-summary .pattern-chev {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    transition: transform 0.2s;
+    flex: 0 0 auto;
+}
+.pattern-collapse[open] > .pattern-summary { margin-bottom: 8px; }
+.pattern-collapse[open] > .pattern-summary .pattern-chev { transform: rotate(180deg); }
+
 /* Bitcoin 开发者动态模块 */
 .builders-section { padding: 0 20px; }
 

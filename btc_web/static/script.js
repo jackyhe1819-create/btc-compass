@@ -509,9 +509,9 @@ function renderRoadmap(d) {
     const catIcon = { '减半': '🟠', '协议': '⚙️', '市场': '📈', '监管': '⚖️', '机构': '🏛️', '黑天鹅': '🦢', '基础设施': '🔧' };
     const certStyle = {
         '历史': { dot: 'var(--accent-btc)', op: '1', badge: '' },
-        '预定': { dot: 'var(--accent-orange)', op: '0.9', badge: '<span style="font-size:0.62rem;color:var(--accent-orange);border:1px solid var(--accent-orange);border-radius:3px;padding:0 3px;margin-left:4px;">预定</span>' },
-        '提案': { dot: mut, op: '0.75', badge: '<span style="font-size:0.62rem;color:' + mut + ';border:1px dashed ' + mut + ';border-radius:3px;padding:0 3px;margin-left:4px;">提案·未定</span>' },
-        '估计': { dot: mut, op: '0.7', badge: '<span style="font-size:0.62rem;color:' + mut + ';border:1px dashed ' + mut + ';border-radius:3px;padding:0 3px;margin-left:4px;">估计</span>' },
+        '预定': { dot: 'var(--accent-orange)', op: '0.9', badge: '<span style="font-size:0.66rem;color:var(--accent-orange);border:1px solid var(--accent-orange);border-radius:3px;padding:0 3px;margin-left:4px;">预定</span>' },
+        '提案': { dot: mut, op: '0.75', badge: '<span style="font-size:0.66rem;color:' + mut + ';border:1px dashed ' + mut + ';border-radius:3px;padding:0 3px;margin-left:4px;">提案·未定</span>' },
+        '估计': { dot: mut, op: '0.7', badge: '<span style="font-size:0.66rem;color:' + mut + ';border:1px dashed ' + mut + ';border-radius:3px;padding:0 3px;margin-left:4px;">估计</span>' },
     };
     const cur = d.current || {};
 
@@ -531,7 +531,7 @@ function renderRoadmap(d) {
         </div>`;
     };
 
-    let html = `<div class="decision-card-title">🗺️ BTC 里程碑路线图 <span class="decision-freq">历史·预定·提案分级</span></div>`;
+    let html = '';
     if (cur.note) {
         html += `<div style="font-size:0.74rem; color:var(--text-secondary); margin:4px 0 8px; background:#f0b90b12; padding:5px 8px; border-radius:4px;">📍 ${cur.note}</div>`;
     }
@@ -550,8 +550,9 @@ function renderRoadmap(d) {
         html += `<div style="font-size:0.76rem; font-weight:600; color:${isFutureEra ? 'var(--accent-orange)' : 'var(--text-secondary)'}; margin:8px 0 2px; border-left:3px solid ${isFutureEra ? 'var(--accent-orange)' : 'var(--accent-btc)'}; padding-left:6px;">${era.era} <span style="font-weight:400; color:${mut}; font-size:0.68rem;">${era.span}</span></div>`;
         html += era.milestones.map(milestoneRow).join('');
     });
-    html += `<div style="font-size:0.66rem; color:${mut}; margin-top:8px; border-top:1px solid var(--border-color,#333); padding-top:6px;">${d.honest_note || ''}</div>`;
-    el.innerHTML = html;
+    html += `<div style="font-size:0.7rem; color:${mut}; margin-top:8px; border-top:1px solid var(--border-color,#333); padding-top:6px;">${d.honest_note || ''}</div>`;
+    // 默认折叠（页面已很长），周期相位卡保持展开做锚点
+    el.innerHTML = `<details class="pattern-collapse"><summary class="pattern-summary"><span>🗺️ BTC 里程碑路线图 <span class="decision-freq" style="font-weight:400;">历史→未来时间轴 · 展开</span></span><span class="pattern-chev">▾</span></summary>${html}</details>`;
 }
 
 // 市场规律与风险版块：慢变，60 分钟拉一次
@@ -574,7 +575,7 @@ function renderMarketPatterns(d) {
     el.style.display = '';
     const pos = 'var(--accent-green)', neg = 'var(--accent-red)', mut = 'var(--text-muted)';
     const sign = v => `<span style="color:${v >= 0 ? pos : neg};">${v >= 0 ? '+' : ''}${v}%</span>`;
-    let html = `<div class="decision-card-title">🧭 市场规律与风险 <span class="decision-freq">对抗核实 · 非交易信号</span></div>`;
+    let html = '';
 
     // ── 利率 × 周期证伪 ──
     if (d.rates) {
@@ -643,7 +644,7 @@ function renderMarketPatterns(d) {
             const isRefuge = role.includes('避风港') || role === '两可';
             const c = isEpi ? neg : (isRefuge ? 'var(--accent-orange)' : mut);
             const bg = isEpi ? '#ea394315' : '#f0864a15';
-            return `<span style="font-size:0.66rem;color:${c};background:${bg};padding:1px 5px;border-radius:3px;white-space:nowrap;">${isEpi ? '⚠震中' : (isRefuge ? '🛡两可' : role)}</span>`;
+            return `<span style="font-size:0.7rem;color:${c};background:${bg};padding:1px 5px;border-radius:3px;white-space:nowrap;">${isEpi ? '⚠震中' : (isRefuge ? '🛡两可' : role)}</span>`;
         };
         const probColor = p => (p.includes('高') ? neg : (p === '中' ? 'var(--accent-orange)' : mut));
         const riskItem = r => `
@@ -665,17 +666,18 @@ function renderMarketPatterns(d) {
             <div style="font-size:0.76rem;font-weight:600;color:var(--text-secondary);margin-top:8px;">🦢 黑天鹅（突发、难预测）</div>
             ${fr.black_swan.map(riskItem).join('')}
             ${fr.macro_note ? `<div style="margin-top:8px;padding:6px 8px;background:#ea394310;border-radius:4px;">
-                <div style="font-size:0.78rem;font-weight:600;color:${neg};">➕ ${fr.macro_note.name} <span style="font-size:0.66rem;font-weight:400;">${roleBadge(fr.macro_note.btc_role)} 概率${fr.macro_note.probability}</span></div>
+                <div style="font-size:0.78rem;font-weight:600;color:${neg};">➕ ${fr.macro_note.name} <span style="font-size:0.7rem;font-weight:400;">${roleBadge(fr.macro_note.btc_role)} 概率${fr.macro_note.probability}</span></div>
                 <div style="font-size:0.7rem;color:var(--text-secondary);margin-top:2px;">${fr.macro_note.summary}</div>
                 <div style="font-size:0.68rem;color:${mut};margin-top:2px;">📊 ${fr.macro_note.fact}</div>
                 <div style="font-size:0.68rem;color:var(--accent-orange);">👁 预警：${fr.macro_note.early_warning}</div></div>` : ''}
             ${fr.secondary && fr.secondary.length ? `<div style="font-size:0.68rem;color:${mut};margin-top:6px;line-height:1.5;">次级/机制完整性：${fr.secondary.join('；')}</div>` : ''}
-            <div style="font-size:0.66rem;color:${mut};margin-top:6px;line-height:1.5;">⚠️ ${fr.honest_note || ''}</div>
+            <div style="font-size:0.7rem;color:${mut};margin-top:6px;line-height:1.5;">⚠️ ${fr.honest_note || ''}</div>
         </div>`;
     }
 
-    html += `<div style="font-size:0.66rem;color:${mut};margin-top:8px;border-top:1px solid var(--border-color,#333);padding-top:6px;">${d.honest_note || ''}</div>`;
-    el.innerHTML = html;
+    html += `<div style="font-size:0.7rem;color:${mut};margin-top:8px;border-top:1px solid var(--border-color,#333);padding-top:6px;">${d.honest_note || ''}</div>`;
+    // 默认折叠（内容长），展开看证伪+黑天鹅+前瞻风险雷达
+    el.innerHTML = `<details class="pattern-collapse"><summary class="pattern-summary"><span>🧭 市场规律与风险 <span class="decision-freq" style="font-weight:400;">证伪·黑天鹅·前瞻风险雷达 · 展开</span></span><span class="pattern-chev">▾</span></summary>${html}</details>`;
 }
 
 /**
@@ -745,7 +747,7 @@ function renderCycleEvents(a) {
         + evBlock('世界杯', events['世界杯'])
         + evBlock('美联储换主席', events['美联储换主席'])
         + evBlock('美国大选', events['美国大选'])
-        + `<div style="font-size:0.66rem; color:var(--text-muted); margin-top:8px; border-top:1px solid var(--border-color,#333); padding-top:6px;">${a.honest_note || ''}</div>`;
+        + `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:8px; border-top:1px solid var(--border-color,#333); padding-top:6px;">${a.honest_note || ''}</div>`;
 }
 
 /**
@@ -792,7 +794,7 @@ function renderTriggerLevels(tl) {
         <div style="margin-top:8px; color:var(--text-secondary); font-size:0.78rem; font-weight:600;">评分档位反解（近似，固定慢变量因子）</div>
         ${bandRows}
         ${reachLine}
-        <div style="color:var(--text-muted); font-size:0.66rem; margin-top:6px;">${(tl.meta && tl.meta.note) || ''}</div>`;
+        <div style="color:var(--text-muted); font-size:0.7rem; margin-top:6px;">${(tl.meta && tl.meta.note) || ''}</div>`;
 }
 
 /**
