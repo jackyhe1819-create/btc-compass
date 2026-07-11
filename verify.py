@@ -26,6 +26,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 LOCAL_URL = "http://127.0.0.1:5070"
@@ -42,6 +43,14 @@ FRESH_FAIL_S = 24 * 3600
 # 覆盖率阈值: 与 scoring/decision 的 0.5 警戒线之上留缓冲, 早于用户发现劣化
 COVERAGE_WARN = 0.85
 COVERAGE_FAIL = 0.5
+
+# ── 探针趋势记忆 (loop engineering: 劣化轨迹早于阈值告警) ──
+# 探针每跑一次把关键指标 append 进 jsonl, 下轮读近 K 条比中位数, 劣化只 WARN。
+# 与绝对阈值互补: 阈值抓"已跌破", 趋势抓"正在滑" —— 比等 FAIL 划算。
+PROBE_HISTORY_PATH = os.path.join(REPO_ROOT, "data", "probe_history.jsonl")
+TREND_K = 5                 # 参与中位数的历史条数 (launchd 日两跑 → 约 2.5 天窗口)
+TREND_MIN_HISTORY = 3       # 少于此不做劣化告警 (样本不足)
+TREND_COVERAGE_DROP = 0.10  # 覆盖率比近期中位低这么多则 WARN
 
 _results = []  # (level, message)
 
@@ -104,6 +113,120 @@ def _get_dashboard(base_url):
         if attempt < PROBE_RETRIES:
             time.sleep(PROBE_RETRY_WAIT)
     return {"__error__": str(last_err) if last_err else "computing 未在重试窗口内完成"}
+
+
+# ── 趋势记忆: 记录 + 劣化判据 (全部 best-effort, 只 WARN, 绝不 FAIL/崩探针) ──
+
+# writer 与 schema 的字段契约 (test_probe_trends 锁死: 写入键集合 == 此清单)
+_PROBE_FIELDS = [
+    "ts", "base_url", "data_source", "data_synthetic", "btc_price",
+    "cycle_score", "tactical_score", "cycle_coverage", "tactical_coverage",
+    "cycle_factors_alive", "cycle_factors_total",
+    "tactical_factors_alive", "tactical_factors_total",
+    "cache_age_s", "score_history_days", "cycle_band", "tactical_pace",
+]
+
+
+def _probe_metrics(base_url, data, indicators, scoring):
+    """从已拉取的 dashboard data 派生一条趋势记录 (纯计算, 无 I/O)。
+    score_history_days 由调用方在拿到 /api/score-history 后补写。"""
+    indicators = indicators or {}
+
+    def alive_total(cfg):
+        members = [m for b in cfg.values() for m in b["members"]]
+        dead = [m for m in members
+                if not indicators.get(m) or indicators[m].get("value") is None]
+        return len(members) - len(dead), len(members)
+
+    ca, ct = alive_total(scoring.CYCLE_BUCKETS)
+    ta, tt = alive_total(scoring.TACTICAL_BUCKETS)
+    dec = data.get("decision") or {}
+    return {
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "base_url": base_url,
+        "data_source": data.get("data_source"),
+        "data_synthetic": data.get("data_synthetic"),
+        "btc_price": data.get("btc_price"),
+        "cycle_score": data.get("total_score"),
+        "tactical_score": data.get("tactical_score"),
+        "cycle_coverage": data.get("cycle_coverage"),
+        "tactical_coverage": data.get("tactical_coverage"),
+        "cycle_factors_alive": ca, "cycle_factors_total": ct,
+        "tactical_factors_alive": ta, "tactical_factors_total": tt,
+        "cache_age_s": data.get("cache_age_s"),
+        "score_history_days": None,
+        "cycle_band": (dec.get("cycle") or {}).get("band"),
+        "tactical_pace": (dec.get("tactical") or {}).get("pace"),
+    }
+
+
+def _record_probe(rec):
+    """best-effort 追加一条 jsonl; 任何失败绝不崩探针。"""
+    try:
+        os.makedirs(os.path.dirname(PROBE_HISTORY_PATH), exist_ok=True)
+        with open(PROBE_HISTORY_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _load_probe_history(base_url):
+    """读同 base_url 的历史记录; best-effort, 坏行跳过, 文件缺失返 []。"""
+    out = []
+    try:
+        with open(PROBE_HISTORY_PATH, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if r.get("base_url") == base_url:
+                    out.append(r)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    return out
+
+
+def _median(xs):
+    xs = sorted(x for x in xs if isinstance(x, (int, float)))
+    if not xs:
+        return None
+    n = len(xs)
+    return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
+
+
+def _check_probe_trends(base_url, rec):
+    """与近 K 条同 base_url 历史比, 劣化只报 WARN (绝不 FAIL)。best-effort。"""
+    try:
+        hist = _load_probe_history(base_url)  # 本轮尚未写入
+        if len(hist) < TREND_MIN_HISTORY:
+            return
+        recent = hist[-TREND_K:]
+        for key, label in (("cycle_coverage", "周期覆盖率"),
+                           ("tactical_coverage", "战术覆盖率")):
+            med = _median([r.get(key) for r in recent])
+            cur = rec.get(key)
+            if med is not None and cur is not None and cur < med - TREND_COVERAGE_DROP:
+                _report("WARN", f"{label}趋势劣化: 当前 {cur:.0%} < 近{len(recent)}次中位 "
+                                f"{med:.0%} − {TREND_COVERAGE_DROP:.0%}")
+        for key, label in (("cycle_factors_alive", "周期因子存活"),
+                           ("tactical_factors_alive", "战术因子存活")):
+            med = _median([r.get(key) for r in recent])
+            cur = rec.get(key)
+            if med is not None and cur is not None and cur < med - 0.5:  # 掉 ≥1
+                _report("WARN", f"{label}趋势劣化: 当前 {cur} < 近期中位 {med}")
+        days = [r.get("score_history_days") for r in recent
+                if isinstance(r.get("score_history_days"), int)]
+        cur_days = rec.get("score_history_days")
+        if days and isinstance(cur_days, int) and cur_days < max(days):
+            _report("WARN", f"评分历史深度回退: {cur_days} < 历史峰值 {max(days)} (回填应只增不减)")
+    except Exception:
+        pass
 
 
 def probe_runtime(base_url) -> None:
@@ -196,9 +319,11 @@ def probe_runtime(base_url) -> None:
         _report("OK", f"缓存新鲜 ({age}s)")
 
     # 评分历史回填深度 (滞回重放依赖 ≥ HYST_CONFIRM×4 天)
+    hist_days = None
     try:
         hist = _fetch_json(f"{base_url}/api/score-history?days=365")
         n = hist.get("total_days", 0)
+        hist_days = n
         need = decision.HYST_CONFIRM * 4
         if n >= need:
             _report("OK", f"评分历史 {n} 天 (滞回重放需 ≥{need})")
@@ -206,6 +331,15 @@ def probe_runtime(base_url) -> None:
             _report("WARN", f"评分历史仅 {n} 天 (<{need}), 滞回档位可信度有限")
     except Exception as e:
         _report("WARN", f"/api/score-history 探测失败: {e}")
+
+    # 趋势记忆: 记录本轮指标 + 与历史比对劣化轨迹 (best-effort, 只 WARN, 不翻退出码)
+    try:
+        rec = _probe_metrics(base_url, data, indicators, scoring)
+        rec["score_history_days"] = hist_days
+        _check_probe_trends(base_url, rec)  # 先比历史 (不含本轮)
+        _record_probe(rec)                  # 再追加本轮
+    except Exception:
+        pass
 
 
 # ────────────────────────────────────────────────────────────

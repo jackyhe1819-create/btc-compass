@@ -35,6 +35,9 @@ btc_web/server.log
 btc_web/cache/
 cache/
 
+# 探针趋势记忆 (verify.py 逐次探针指标, 机器本地日志, 不入库)
+data/probe_history.jsonl
+
 # Local-only / IDE / archived directories (不进仓库)
 .claude/*
 !.claude/skills/
