@@ -4,7 +4,10 @@ services:
     runtime: python
     rootDir: .
     buildCommand: pip install -r btc_web/requirements.txt
-    startCommand: cd btc_web && gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --preload
+    # 不要加 --preload: 模块级预热/回填线程会跑在 gunicorn master 进程里,
+    # 预热的是 master 的内存缓存而非 worker 的, 且与 worker 的历史写入跨进程竞态
+    # (2026-07 复查修复; score_history 另有 fcntl 文件锁兜底)
+    startCommand: cd btc_web && gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.11

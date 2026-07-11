@@ -441,56 +441,100 @@ def fetch_etf_volume() -> Tuple[float, float, str]:
     return 0.0, 0.0, "点击查看详情 ↗"
 
 
+# MSTR 兜底常数 — 动态源失败时使用, 必须带快照日期并在状态显式标注 (2026-07 审计)
+MSTR_BTC_FALLBACK    = 843_775      # CoinGecko public_treasury 2026-07-10 快照
+MSTR_SHARES_FALLBACK = 246_000_000  # 流通股本 2026Q1 快照 (ATM 增发后偏低)
+
+
+def fetch_public_treasury():
+    """
+    CoinGecko public_treasury 原始载荷, 经 _cached_onchain 6h 缓存。
+    此前 calc_mnav / calc_company_holdings / fetch_dat_holdings 三处各自裸连同一
+    端点 (~28 次/时), 与 bd 限流自伤同构 — 集中一处缓存 (2026-07 复查修复)。
+    """
+    from .indicators_v2 import _cached_onchain
+
+    def _fetch():
+        r = requests.get(
+            "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin",
+            timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            print(f"⚠️ CoinGecko public_treasury HTTP {r.status_code}")
+            return None
+        data = r.json()
+        return data if data.get("companies") else None
+
+    return _cached_onchain("cg-public-treasury", _fetch)
+
+
+def fetch_mstr_holdings():
+    """结构化取 Strategy(MSTR) 持仓 BTC 数。失败返回 None (调用方退常数并标注)。"""
+    data = fetch_public_treasury()
+    if not data:
+        return None
+    cands = [c for c in data.get("companies", [])
+             if "strategy" in str(c.get("name", "")).lower()
+             or "micro" in str(c.get("name", "")).lower()]
+    if not cands:
+        return None
+    # 命中多个 (AsiaStrategy/Microcloud 等) 时取持仓最大者 = 真·Strategy
+    best = max(cands, key=lambda c: float(c.get("total_holdings") or 0))
+    v = float(best.get("total_holdings") or 0)
+    return v if v > 0 else None
+
+
+def fetch_mstr_shares():
+    """MSTR 流通股本 (yfinance fast_info, 6h 缓存)。失败返回 None。"""
+    from .indicators_v2 import _cached_onchain
+
+    def _fetch():
+        import yfinance as yf
+        fi = yf.Ticker("MSTR").fast_info
+        for k in ("shares", "sharesOutstanding", "shares_outstanding"):
+            try:
+                v = fi[k]
+                if v and float(v) > 0:
+                    return float(v)
+            except (KeyError, TypeError, ValueError):
+                continue
+        return None
+
+    return _cached_onchain("mstr-shares", _fetch)
+
+
 def fetch_company_holdings_data() -> Tuple[float, str]:
     """
-    获取上市公司持仓数据
-    来源: CoinGecko Public Treasury API
+    获取上市公司持仓数据 (经 fetch_public_treasury 6h 缓存)
     返回: (total_holdings, status_text)
     """
-    try:
-        response = requests.get(
-            "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin",
-            timeout=15
-        )
-        if response.status_code == 200:
-            data = response.json()
-            total_holdings = data.get('total_holdings', 0)
-            
-            # 获取前几名公司
-            companies = data.get('companies', [])
-            top_text = ""
-            if companies:
-                mstr = next((c for c in companies if 'Strategy' in c['name'] or 'Micro' in c['name']), None)
-                if mstr:
-                    top_text = f"MSTR: {mstr['total_holdings']:,.0f} BTC"
-            
-            status = f"总持仓 {total_holdings:,.0f} BTC"
-            if top_text:
-                status += f" | {top_text}"
-                
-            return total_holdings, status
-            
-    except Exception as e:
-        print(f"⚠️ Company Holdings API 失败: {e}")
-        
+    data = fetch_public_treasury()
+    if data:
+        total_holdings = data.get('total_holdings', 0)
+        companies = data.get('companies', [])
+        top_text = ""
+        if companies:
+            mstr = fetch_mstr_holdings()
+            if mstr:
+                top_text = f"MSTR: {mstr:,.0f} BTC"
+
+        status = f"总持仓 {total_holdings:,.0f} BTC"
+        if top_text:
+            status += f" | {top_text}"
+        return total_holdings, status
+
     return 0.0, "API 暂不可用"
 
 
 def fetch_dat_holdings(limit: int = 8):
     """
     上市公司 BTC 持仓 Top N（DAT 卡片用）
-    来源: CoinGecko Public Treasury API（免费）
+    来源: CoinGecko Public Treasury API（经 fetch_public_treasury 6h 缓存）
     返回 {total, companies:[{name, symbol, holdings, pct_supply}], updated_at}，失败 None
     """
     try:
-        r = requests.get(
-            "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin",
-            timeout=15, headers={"User-Agent": "Mozilla/5.0"}
-        )
-        if r.status_code != 200:
-            print(f"⚠️ DAT Holdings API HTTP {r.status_code}")
+        data = fetch_public_treasury()
+        if not data:
             return None
-        data = r.json()
         companies = []
         for c in (data.get("companies") or [])[:limit]:
             sym = (c.get("symbol") or "").strip()
@@ -615,9 +659,32 @@ def calc_mnav() -> IndicatorResult:
     - mNAV 1-1.5: 低溢价，偏低估 🟢
     - mNAV < 1  : 折价，极罕见机会 🟢
     """
-    # MSTR 基础数据（随公告更新）
-    MSTR_BTC      = 568_840       # 持仓 BTC（截至 2026Q1）
-    MSTR_SHARES   = 246_000_000   # 流通股本（约）
+    # 持仓动态获取 (CoinGecko public_treasury, 结构化取数, 6h 缓存); 失败退常数快照。
+    # 2026-07 审计发现旧常数 568,840 比实际少 48% (NAV 被低估近半) —
+    # 常数兜底必须带快照日期、显式标注并打日志, 不允许静默陈旧。
+    stale_notes = []
+    mstr_btc = None
+    try:
+        mstr_btc = fetch_mstr_holdings()
+    except Exception as e:
+        print(f"⚠️ MSTR 持仓动态获取失败: {e}")
+    if not mstr_btc or mstr_btc <= 0:
+        mstr_btc = MSTR_BTC_FALLBACK
+        stale_notes.append("持仓常数2026-07快照")
+        print("⚠️ MSTR 持仓退常数兜底 (CoinGecko 不可用)")
+
+    # 股本动态获取 (yfinance fast_info, 6h 缓存 — 股本为慢变量);
+    # 失败退常数。市值 = 股本 × 实时股价, 与 NAV 的实时 BTC 价口径一致。
+    # (复查修掉的旧方案 Yahoo v7 quote 是双重死代码: NameError + 现网 401)
+    mstr_shares = None
+    try:
+        mstr_shares = fetch_mstr_shares()
+    except Exception as e:
+        print(f"⚠️ MSTR 股本动态获取失败: {e}")
+    if not mstr_shares or mstr_shares <= 0:
+        mstr_shares = MSTR_SHARES_FALLBACK
+        stale_notes.append("股本常数2026Q1快照")
+        print("⚠️ MSTR 股本退常数兜底 (yfinance 不可用)")
 
     # 获取 BTC 价格
     btc_price = None
@@ -635,8 +702,6 @@ def calc_mnav() -> IndicatorResult:
 
     _desc   = ("衡量 Strategy(MSTR) 股票市值相对其持有 BTC 净资产的溢价倍数。"
                "溢价越高说明市场对 MSTR 杠杆 BTC 模式给予更高定价。历史区间 1×–3×。")
-    _method = (f"mNAV = MSTR市值({MSTR_SHARES/1e6:.0f}M股 × 股价) "
-               f"÷ ({MSTR_BTC:,} BTC × BTC价格)")
 
     if btc_price is None or mstr_price is None:
         return IndicatorResult(
@@ -645,12 +710,17 @@ def calc_mnav() -> IndicatorResult:
             status=f"数据获取失败 (MSTR={'N/A' if mstr_price is None else f'${mstr_price:.0f}'})",
             priority="P0",
             url="https://saylortracker.com/",
-            description=_desc, method=_method
+            description=_desc,
+            method="mNAV = MSTR市值 ÷ (持仓BTC × BTC价格)。数据获取失败。"
         )
 
-    btc_nav = MSTR_BTC * btc_price
-    mkt_cap = MSTR_SHARES * mstr_price
-    mnav    = mkt_cap / btc_nav
+    btc_nav = mstr_btc * btc_price
+    mkt_cap = mstr_shares * mstr_price
+    mnav = mkt_cap / btc_nav
+
+    _method = (f"mNAV = MSTR市值({mstr_shares/1e6:.0f}M股 × 股价) ÷ "
+               f"({mstr_btc:,.0f} BTC × BTC价格)。持仓取自 CoinGecko public_treasury、"
+               "股本取自 yfinance (各 6h 缓存); 常数兜底带快照日期并在状态标注。")
 
     if mnav < 1.0:
         score, color, label = 1.0, "🟢", "折价 — 极罕见"
@@ -663,12 +733,14 @@ def calc_mnav() -> IndicatorResult:
     else:
         score, color, label = -1.0, "🔴", "极高溢价 — 泡沫风险"
 
+    stale_suffix = f" | ⚠️{'/'.join(stale_notes)}" if stale_notes else ""
+    price_part = f"MSTR ${mstr_price:.1f} | " if mstr_price is not None else ""
     return IndicatorResult(
         name="MSTR mNAV",
         value=round(mnav, 2),
         score=score, color=color,
-        status=(f"MSTR ${mstr_price:.1f} | BTC NAV ${btc_nav/1e9:.1f}B | "
-                f"{mnav:.2f}x {label}"),
+        status=(f"{price_part}BTC NAV ${btc_nav/1e9:.1f}B | "
+                f"{mnav:.2f}x {label}{stale_suffix}"),
         priority="P0",
         url="https://saylortracker.com/",
         description=_desc, method=_method

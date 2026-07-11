@@ -19,8 +19,11 @@ btc_dashboard.decision
 每个档位附 12 年回测的分档前瞻收益统计 (data/band_stats.json,
 由 backtest/run_backtest.py 生成) — 样本内标定, 展示时带免责说明。
 
-滞回状态不落盘: 每次用评分历史 (score_history, 回填 90 天) 重放推导,
-无状态、幂等、跨重启一致。历史不足时退化为无滞回档位并如实标注。
+滞回状态不落盘: 每次用评分历史 (score_history, 回填 90 天) 重放推导 —
+同一份历史下确定且幂等。注意该性质**以历史本身持久为前提**: Render free 无
+持久盘, 每次部署评分历史由 backfill 按近似口径重建 (v2 起口径已与实时对齐),
+生效档位跨部署可能随重建历史刷新而非延续旧实例。历史不足时退化为无滞回档位
+并如实标注。
 """
 
 import os
@@ -229,6 +232,8 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
         "warnings": warnings,
         "stats_meta": {
             "generated": stats.get("generated") if stats else None,
-            "note": "分档统计来自12年回测, 阈值与历史同源 (样本内), 非收益承诺",
+            "note": ("分档统计来自12年回测, 阈值与历史同源 (样本内), 非收益承诺; "
+                     "回测因子集与现网不完全一致 (动量仅日/周/月三腿、无期货基差/多空比), "
+                     "统计为近似条件参考"),
         },
     }

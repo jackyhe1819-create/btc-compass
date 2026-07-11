@@ -79,7 +79,10 @@ def calc_200w_ma_heatmap(df: pd.DataFrame) -> IndicatorResult:
     - 颜色根据价格偏离度变化
     """
     if df.empty or len(df) < 1400:
-        return IndicatorResult(name="200-Week Heatmap", value=0, score=0, color="⚪", status="数据不足", priority="P0")
+        # value 必须 NaN: 计分成员返回 value=0 会以"伪中性票"留在桶内稀释
+        # 其余成员 (scoring 以 value 非 NaN 判定在场, 2026-07 审计遗留批修复)
+        return IndicatorResult(name="200-Week Heatmap", value=float('nan'), score=0,
+                               color="⚪", status="数据不足 (需1400天)", priority="P0")
 
     current_price = df['price'].iloc[-1]
     
@@ -374,16 +377,38 @@ def calc_hashrate() -> IndicatorResult:
             url="https://mempool.space/graphs/mining/hashrate-difficulty",
         )
 
-    # 评分逻辑：算力上涨是利好
-    if hashrate_ehs > 800:
-        score, color = 1, "🟢"
-        status = f"{hashrate_ehs:.1f} EH/s (历史新高)"
-    elif hashrate_ehs > 500:
-        score, color = 0.5, "🟢"
-        status = f"{hashrate_ehs:.1f} EH/s (高算力)"
+    # 对照一年真实峰值打标 — 旧版 ">800 EH/s 即报'历史新高'+1" 在算力从峰值
+    # 回落 37% 的矿工投降期仍显示新高, 方向性误导 (2026-07 审计遗留批修复)
+    peak_1y = None
+    try:
+        from .indicators_v2 import _cached_onchain
+
+        def _fetch_1y_peak():
+            r2 = requests.get("https://mempool.space/api/v1/mining/hashrate/1y",
+                              timeout=12, headers={"User-Agent": "Mozilla/5.0"})
+            if r2.status_code != 200:
+                return None
+            pts = [float(x.get("avgHashrate", 0)) for x in (r2.json() or {}).get("hashrates", [])]
+            return max(pts) / 1e18 if pts else None
+
+        peak_1y = _cached_onchain("hashrate-1y-peak", _fetch_1y_peak)
+    except Exception as e:
+        print(f"⚠️ 一年算力峰值获取失败: {e}")
+
+    if peak_1y and peak_1y > 0:
+        dist = hashrate_ehs / peak_1y - 1
+        if dist >= -0.02:
+            score, color = 0.5, "🟢"
+            status = f"{hashrate_ehs:.1f} EH/s (逼近一年峰值)"
+        elif dist >= -0.15:
+            score, color = 0, "🟡"
+            status = f"{hashrate_ehs:.1f} EH/s (较一年峰值 {dist:+.0%})"
+        else:
+            score, color = 0, "🟠"
+            status = f"{hashrate_ehs:.1f} EH/s (较一年峰值 {dist:+.0%} — 算力收缩期)"
     else:
         score, color = 0, "🟡"
-        status = f"{hashrate_ehs:.1f} EH/s"
+        status = f"{hashrate_ehs:.1f} EH/s (峰值参照不可用)"
 
     return IndicatorResult(
         name="全网算力",
@@ -394,7 +419,7 @@ def calc_hashrate() -> IndicatorResult:
         priority="P2",
         url="https://mempool.space/graphs/mining/hashrate-difficulty",
         description="全网算力是衡量比特币网络安全性和矿工投入程度的指标。",
-        method="主源 mempool.space (3d 平均) → 备源 blockchain.info charts API。算力持续增长通常被视为网络健康和长期价值的积极信号。"
+        method="主源 mempool.space (3d 平均) → 备源 blockchain.info charts API。标签对照一年真实峰值（mempool 1y, 6h 缓存）：距峰值 ≤2% 为逼近峰值，回落 >15% 标注算力收缩期。"
     )
 
 

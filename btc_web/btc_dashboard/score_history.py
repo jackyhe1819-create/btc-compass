@@ -12,11 +12,37 @@ btc_dashboard.score_history
 import os
 import json
 import tempfile
+import threading
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional
 
 _HISTORY_FILE = "score_history.json"
 _MAX_ENTRIES = 730  # 最多保留 2 年
+
+# 历史文件的读-改-写互斥: 刷新线程 (record_score_snapshot) 与回填线程
+# (ensure_backfilled 的 load→merge→save) 并发时会互相吞掉对方写入。
+# 双层锁 (2026-07 复查修复): threading.Lock 只覆盖同进程线程 — gunicorn
+# --preload 下模块级线程在 master、请求刷新在 worker, 进程内锁跨不过去;
+# 故再叠加 fcntl 文件锁做跨进程互斥, 正确性不依赖 gunicorn 启动参数。
+# 写方在整个 load→modify→save 区间持锁; 纯读方无须持锁 (原子替换保证读到完整文件)。
+_thread_lock = threading.Lock()
+
+
+@contextmanager
+def history_write_lock(cache_dir: str):
+    lock_path = os.path.join(cache_dir, ".score_history.lock")
+    with _thread_lock:
+        f = open(lock_path, "w")
+        try:
+            try:
+                import fcntl
+                fcntl.flock(f, fcntl.LOCK_EX)
+            except ImportError:
+                pass  # 非 POSIX 平台退化为纯线程锁
+            yield
+        finally:
+            f.close()  # close 自动释放 flock
 
 
 # 周期分仓位档位（与 scoring.cycle_recommendation 阈值一致, 2026-07 重标定）
@@ -113,14 +139,15 @@ def record_score_snapshot(dashboard: dict, cache_dir: str):
         "statuses": statuses,
     }
 
-    entries = _load_history(cache_dir)
-    if entries and entries[-1].get("date") == today:
-        entries[-1] = entry
-    else:
-        entries.append(entry)
+    with history_write_lock(cache_dir):
+        entries = _load_history(cache_dir)
+        if entries and entries[-1].get("date") == today:
+            entries[-1] = entry
+        else:
+            entries.append(entry)
 
-    entries = entries[-_MAX_ENTRIES:]
-    _save_history(cache_dir, entries)
+        entries = entries[-_MAX_ENTRIES:]
+        _save_history(cache_dir, entries)
 
 
 def _compute_changes(prev: Optional[dict], curr: dict) -> dict:

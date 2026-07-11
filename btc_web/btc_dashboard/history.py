@@ -702,11 +702,24 @@ def get_max_pain_history(df: pd.DataFrame, days: int = 30) -> dict:
 
 
 def get_mnav_history(df: pd.DataFrame = None, days: int = 30) -> dict:
-    """MSTR mNAV 历史数据：用 yfinance 同时拉取 MSTR 和 BTC-USD 计算"""
+    """
+    MSTR mNAV 历史数据：用 yfinance 同时拉取 MSTR 和 BTC-USD 计算。
+    持仓/股本与实时卡片同源 (indicators_aux 动态获取, 失败退同一组带日期常数) —
+    2026-07 复查发现图表链路曾滞留旧常数 568,840, 图表值 = 卡片值 ×1.48 互相矛盾。
+    注: 历史各日按"当前"持仓/股本近似 (历史逐日的真实持仓无免费序列), 短窗口内可接受。
+    """
     try:
         import yfinance as yf
-        MSTR_BTC    = 568_840
-        MSTR_SHARES = 246_000_000
+        from .indicators_aux import (fetch_mstr_holdings, fetch_mstr_shares,
+                                     MSTR_BTC_FALLBACK, MSTR_SHARES_FALLBACK)
+        try:
+            MSTR_BTC = fetch_mstr_holdings() or MSTR_BTC_FALLBACK
+        except Exception:
+            MSTR_BTC = MSTR_BTC_FALLBACK
+        try:
+            MSTR_SHARES = fetch_mstr_shares() or MSTR_SHARES_FALLBACK
+        except Exception:
+            MSTR_SHARES = MSTR_SHARES_FALLBACK
 
         end   = datetime.now()
         start = end - timedelta(days=days + 14)

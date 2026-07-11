@@ -35,7 +35,7 @@ from .scoring import (
     CYCLE_BUCKETS, TACTICAL_BUCKETS, _compute_bucket_scores,
     cycle_recommendation, PERCENTILE_WINDOW,
 )
-from .score_history import _load_history, _save_history
+from .score_history import _load_history, _save_history, history_write_lock
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
             "Accept": "application/json"}
@@ -629,13 +629,22 @@ def ensure_backfilled(cache_dir: str, days: int = 90) -> bool:
     new_entries = reconstruct(days, cache_dir)
     if not new_entries:
         raise RuntimeError("回填结果为空")
-    real_dates = {e["date"] for e in existing if not e.get("backfilled")}
-    merged = {e["date"]: e for e in new_entries if e["date"] not in real_dates}
-    for e in existing:
-        if e["date"] not in merged or not e.get("backfilled"):
-            merged[e["date"]] = e
-    final = sorted(merged.values(), key=lambda x: x["date"])
-    _save_history(cache_dir, final)
+
+    # 合并阶段持锁并在锁内重读: reconstruct 耗时数分钟, 期间刷新线程可能已写入
+    # 新快照, 无锁 load→merge→save 会把它吞掉 (2026-07 审计遗留批修复)。
+    # 锁只包住秒级的读-改-写, 不包 reconstruct。(线程锁+fcntl 文件锁双层,
+    # 跨 gunicorn master/worker 进程也互斥)
+    with history_write_lock(cache_dir):
+        existing = _load_history(cache_dir)
+        if stale_rebuild:
+            existing = [e for e in existing if not e.get("backfilled")]
+        real_dates = {e["date"] for e in existing if not e.get("backfilled")}
+        merged = {e["date"]: e for e in new_entries if e["date"] not in real_dates}
+        for e in existing:
+            if e["date"] not in merged or not e.get("backfilled"):
+                merged[e["date"]] = e
+        final = sorted(merged.values(), key=lambda x: x["date"])
+        _save_history(cache_dir, final)
 
     with open(marker, "w") as f:
         f.write(datetime.now().isoformat())

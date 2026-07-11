@@ -52,6 +52,30 @@ def _cm_chip_series(key: str):
         return None
 
 
+def _cm_chip_last(key: str):
+    """
+    CM 派生序列最后一个有效值及其日期 → (value, 'MM-DD') 或 (None, "")。
+    CM 社区 API 末行的市值/估值列常为空 (实际取到 T-2), 展示取值日期
+    避免读者误以为是 T-1 (2026-07 复查修复)。
+    """
+    try:
+        from .history import _fetch_cm_history
+        hist = _fetch_cm_history(PERCENTILE_WINDOW)
+        if not hist or not hist.get(key):
+            return None, ""
+        vals = hist[key]
+        dates = hist.get("dates") or []
+        for i in range(len(vals) - 1, -1, -1):
+            v = vals[i]
+            if v is not None and v == v:
+                d = str(dates[i])[5:] if i < len(dates) else ""
+                return float(v), d
+        return None, ""
+    except Exception as e:
+        print(f"⚠️ CM 链上末值 [{key}] 获取失败: {e}")
+        return None, ""
+
+
 def _pct_floor_score(key: str, abs_score: float):
     """
     分位数评分 + 绝对阈值极值保底。
@@ -88,14 +112,17 @@ def calc_mvrv_z() -> IndicatorResult:
     MVRV Z-Score — 市值与已实现市值的偏离度（链上周期估值核心指标）
     历史规律: < 0 周期底部带, > 7 历史顶部带（周期振幅递减, 现代阈值压缩至 ~5）
     """
-    # 经 _bd_last 走 6h 缓存 (bitcoin-data.com 匿名限 10 次/小时)
-    z = _bd_last("mvrv-zscore", "mvrvZscore")
-
+    # 主源 CoinMetrics 派生序列 (免限流)。bd 退居备源: Render 共享出口 IP 的
+    # bitcoin-data 匿名配额 (10/h) 常被其它租户耗尽, 非独占端点退出竞争,
+    # 把配额留给 bd 独占且无替代的 STH成本线/SOPR (2026-07 审计遗留批修复)。
+    # 口径注意: CM 派生 Z 用 rolling(730)σ, 与 bd/Glassnode 的全历史扩张σ
+    # 有量级差 (今日 0.54 vs 0.34), 绝对阈值 0/1/3/5 按扩张σ标定 — 但评分
+    # 以 4 年分位数为主 (分位对各自序列自洽), 绝对腿仅极值保底, 走 CM 时标注口径。
+    z, z_date = _cm_chip_last("mvrv_z")
+    z_note = f"CM 730σ口径·{z_date}" if z is not None and z_date else \
+             ("CM 730σ口径" if z is not None else "")
     if z is None:
-        # 备源: CoinMetrics 派生序列末值 (口径略有差异, 但优于无数据)
-        s = _cm_chip_series("mvrv_z")
-        if s is not None and len(s):
-            z = float(s.iloc[-1])
+        z = _bd_last("mvrv-zscore", "mvrvZscore")
 
     if z is None:
         return IndicatorResult(
@@ -121,6 +148,8 @@ def calc_mvrv_z() -> IndicatorResult:
     enhanced = _pct_floor_score("mvrv_z", score)
     if enhanced is not None:
         score, note = enhanced
+    if z_note:
+        note = f"{note} | {z_note}" if note else z_note
 
     return IndicatorResult(
         name="MVRV-Z", value=round(z, 3), score=score, color=_score_color(score),
@@ -528,11 +557,12 @@ def calc_nupl() -> IndicatorResult:
     NUPL — 全网未实现盈亏占市值比例
     经典周期分区: <0 投降, 0~0.25 希望/恐惧, 0.25~0.5 乐观, 0.5~0.75 信仰, >0.75 兴奋
     """
-    nupl = _bd_last("nupl", "nupl")
+    # 主源 CoinMetrics (NUPL≡1−1/MVRV 恒等式派生, 与 bd 相关 0.9999);
+    # bd 退居备源, 配额让给独占的 STH/SOPR (2026-07 审计遗留批)
+    nupl, cm_date = _cm_chip_last("nupl")
+    cm_note = f"CM·{cm_date}" if nupl is not None and cm_date else ""
     if nupl is None:
-        s = _cm_chip_series("nupl")
-        if s is not None and len(s):
-            nupl = float(s.iloc[-1])
+        nupl = _bd_last("nupl", "nupl")
 
     if nupl is None:
         return IndicatorResult(
@@ -556,6 +586,8 @@ def calc_nupl() -> IndicatorResult:
     enhanced = _pct_floor_score("nupl", score)
     if enhanced is not None:
         score, note = enhanced
+    if cm_note:
+        note = f"{note} | {cm_note}" if note else cm_note
 
     return IndicatorResult(
         name="NUPL", value=round(nupl, 4), score=score, color=_score_color(score),
@@ -603,11 +635,12 @@ def calc_puell_multiple() -> IndicatorResult:
     Puell Multiple — 矿工日收入 / 其 365 日均值
     矿工经济学周期指标: <0.5 历史底部带(关机价附近), >4 顶部带
     """
-    puell = _bd_last("puell-multiple", "puellMultiple")
+    # 主源 CoinMetrics (发行USD/365日均值直算, 与 bd 相关 0.94);
+    # bd 退居备源, 配额让给独占的 STH/SOPR (2026-07 审计遗留批)
+    puell, cm_date = _cm_chip_last("puell")
+    cm_note = f"CM·{cm_date}" if puell is not None and cm_date else ""
     if puell is None:
-        s = _cm_chip_series("puell")
-        if s is not None and len(s):
-            puell = float(s.iloc[-1])
+        puell = _bd_last("puell-multiple", "puellMultiple")
 
     if puell is None:
         return IndicatorResult(
@@ -631,6 +664,8 @@ def calc_puell_multiple() -> IndicatorResult:
     enhanced = _pct_floor_score("puell", score)
     if enhanced is not None:
         score, note = enhanced
+    if cm_note:
+        note = f"{note} | {cm_note}" if note else cm_note
 
     return IndicatorResult(
         name="Puell Multiple", value=round(puell, 3), score=score, color=_score_color(score),
