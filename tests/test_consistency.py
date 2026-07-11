@@ -3,12 +3,13 @@
 """
 配置一致性对账 — 把 CLAUDE.md 里"改档位阈值后须同步各处"的人工纪律变成机器检查。
 
-周期分档位阈值存在于 4 处, 战术分 3 处, 滞回参数 3 处:
+周期分档位阈值存在于 5 处, 战术分 3 处, 滞回参数 3 处:
   1. btc_web/btc_dashboard/decision.py      CYCLE_BANDS / TACTICAL_BANDS / HYST_*
   2. btc_web/btc_dashboard/scoring.py       cycle_recommendation / tactical_recommendation
   3. btc_web/btc_dashboard/score_history.py _BANDS
   4. backtest/evaluate.py                   CYCLE_BANDS / TACTICAL_BANDS
-  5. btc_web/btc_dashboard/data/band_stats.json (由 backtest/run_backtest.py 生成)
+  5. btc_web/btc_dashboard/triggers.py      _BAND_EDGES (触发价位表越界标签, 内嵌档名+仓位区间)
+  6. btc_web/btc_dashboard/data/band_stats.json (由 backtest/run_backtest.py 生成)
 任何一处改动未同步, 本文件必须红。
 """
 import json
@@ -17,7 +18,7 @@ import re
 
 import pytest
 
-from btc_dashboard import decision, scoring, score_history
+from btc_dashboard import decision, scoring, score_history, triggers
 from backtest import evaluate
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -105,6 +106,50 @@ def test_score_history_bands_match_decision():
             score_history._BANDS, decision.CYCLE_BANDS):
         assert h_lo == d_lo, f"「{d_name}」下界: score_history={h_lo} decision={d_lo}"
         assert h_label == d_name
+
+
+# ────────────────────────────────────────────────────────────
+# decision.py ↔ triggers.py 触发价位表档位边界
+# ────────────────────────────────────────────────────────────
+
+def test_trigger_band_edges_match_decision():
+    """
+    triggers._BAND_EDGES (触发价位表的档位越界标签) 内嵌了阈值、档名、仓位区间,
+    但此前无任何一致性测试守护 —— 改 decision.CYCLE_BANDS 却漏改 triggers 时,
+    触发价位表会静默按旧边界算档位。本测试补上这道网。
+
+    每条边界 (阈值, "进/跌入X档 (a-b%仓)", 方向) 的不变式:
+      - 档名 X 必须唯一对应 CYCLE_BANDS 里一个真实档
+      - 内嵌仓位区间 a-b% 必须等于该档的 (仓位下限, 仓位上限)
+      - 阈值: up 边界 = 该档自身下界; down 边界 = 上一档 (更高档) 的下界
+        (向上穿过某档下界即"进"该档; 向下穿过上一档下界即"跌入"下一档)
+    """
+    pos_re = re.compile(r"\((\d+)-(\d+)%仓\)")
+    for thr, label, direction in triggers._BAND_EDGES:
+        assert direction in ("up", "down"), f"未知方向「{direction}」: {label!r}"
+
+        # 档名: 取唯一一个作为 label 子串出现的 CYCLE_BANDS 档名
+        # (前 3 条带"档"后缀、防守区无, 故用子串匹配而非精确切割)
+        matched = [(i, b) for i, b in enumerate(decision.CYCLE_BANDS) if b[1] in label]
+        assert len(matched) == 1, \
+            f"触发边界 {label!r} 未能唯一对应 CYCLE_BANDS 一档 (匹配到 {[b[1] for _, b in matched]})"
+        idx, (b_lo, name, plo, phi, *_) = matched[0]
+
+        # 内嵌仓位区间
+        m = pos_re.search(label)
+        assert m, f"触发边界 {label!r} 未能解析仓位区间 (格式变了?)"
+        assert (int(m.group(1)), int(m.group(2))) == (plo, phi), \
+            f"「{name}」仓位区间: triggers={m.group(1)}-{m.group(2)}% decision={plo}-{phi}%"
+
+        # 阈值对应 (up=该档下界; down=上一档下界)
+        if direction == "up":
+            assert thr == b_lo, \
+                f"「{name}」up 边界阈值 triggers={thr} ≠ 该档下界 decision={b_lo}"
+        else:
+            assert idx >= 1, f"「{name}」是最高档, 不应有向下跌入边界"
+            above_lo = decision.CYCLE_BANDS[idx - 1][0]
+            assert thr == above_lo, \
+                f"「{name}」down 边界阈值 triggers={thr} ≠ 上一档下界 decision={above_lo}"
 
 
 # ────────────────────────────────────────────────────────────
