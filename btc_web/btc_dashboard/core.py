@@ -118,6 +118,7 @@ class DashboardResult:
     data_synthetic: bool = False             # True = 全部数据源失败, 用的演示数据, 评分无效
     cycle_coverage: float = 1.0              # 周期分有效因子权重覆盖率 (0~1)
     tactical_coverage: float = 1.0           # 战术分有效因子权重覆盖率 (0~1)
+    trigger_levels: Optional[Dict] = None    # 触发价位表 (triggers.py, 机械反解非预测)
 
 
 # ============================================================

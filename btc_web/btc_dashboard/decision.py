@@ -237,3 +237,56 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
                      "统计为近似条件参考"),
         },
     }
+
+
+# ============================================================
+# 评分历史事件标记 (2026-07 事件研究 B 层)
+# ============================================================
+
+# 事件研究的诚实结论 — 展示事件必须携带此口径, 不得包装成"胜率信号"
+_EVENT_NOTE_CROSS = ("事件研究: 12年12次触发≈3个独立周期段, 统计力不足 — "
+                     "周期叙事参考, 非胜率信号")
+_EVENT_NOTE_SWITCH = "决策层滞回换档动作 (12年约7次/年); 卖出侧无胜率含义, 仅风险管理"
+
+
+def extract_events(history_entries: list) -> list:
+    """
+    评分历史 → 图表事件标记: 上穿0.30/0.15、转负、滞回换档。
+    口径与 backtest/event_study.py 一致 (10天去抖); 仅覆盖窗口内历史,
+    每个事件自带诚实标注。
+    """
+    pts = [(e["date"], e["total_score"]) for e in history_entries
+           if e.get("total_score") is not None]
+    if len(pts) < 12:
+        return []
+    vals = [s for _, s in pts]
+    events = []
+
+    for i in range(10, len(vals)):
+        window = vals[i - 10:i]
+        for level, label in ((0.30, "上穿0.30 · 进偏多档"), (0.15, "上穿0.15 · 进标准档")):
+            if vals[i] >= level and all(v < level for v in window):
+                events.append({"date": pts[i][0], "side": "buy", "label": label,
+                               "score": vals[i], "note": _EVENT_NOTE_CROSS})
+        if vals[i] <= 0 and all(v > 0 for v in window):
+            events.append({"date": pts[i][0], "side": "risk", "label": "周期分转负",
+                           "score": vals[i], "note": _EVENT_NOTE_CROSS})
+
+    seq, _, _ = replay_hysteresis(vals)
+    for i in range(1, len(seq)):
+        if seq[i] != seq[i - 1]:
+            up = seq[i] < seq[i - 1]
+            events.append({
+                "date": pts[i][0], "side": "buy" if up else "risk",
+                "label": f"滞回{'升' if up else '降'}档 → {CYCLE_BANDS[seq[i]][1]}",
+                "score": vals[i], "note": _EVENT_NOTE_SWITCH,
+            })
+
+    seen = set()
+    out = []
+    for ev in sorted(events, key=lambda x: x["date"]):
+        key = (ev["date"], ev["label"])
+        if key not in seen:
+            seen.add(key)
+            out.append(ev)
+    return out

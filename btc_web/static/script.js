@@ -467,6 +467,54 @@ function renderDashboard(data) {
 
     // 渲染今日量化决策面板
     renderDecisionPanel(data.decision);
+    renderTriggerLevels(data.trigger_levels);
+}
+
+/**
+ * 触发价位表：机械反解"什么价格会翻转哪个信号"。
+ * 事件研究 B 层 — 不承诺胜率，价位随均线/慢变量每日漂移。
+ */
+function renderTriggerLevels(tl) {
+    const el = document.getElementById('decisionTriggers');
+    if (!el) return;
+    if (!tl || !tl.hard || !tl.hard.length) { el.style.display = 'none'; return; }
+    el.style.display = '';
+
+    const fmt = p => '$' + Number(p).toLocaleString('en-US', { maximumFractionDigits: 0 });
+    const distBadge = d => {
+        const cls = d >= 0 ? 'pos' : 'neg';
+        return `<span class="decision-stat-chip ${cls}" style="margin-left:6px;">${d >= 0 ? '+' : ''}${d}%</span>`;
+    };
+
+    const hardRows = tl.hard.map(h => `
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; padding:4px 0; border-bottom:1px dashed var(--border-color, #333);">
+            <span style="color:var(--text-secondary); font-size:0.82rem;">${h.side === 'support' ? '🛡️' : '🚧'} ${h.name}</span>
+            <span style="white-space:nowrap;"><b>${fmt(h.price)}</b>${distBadge(h.distance_pct)}</span>
+        </div>
+        <div style="color:var(--text-muted); font-size:0.68rem; margin:2px 0 6px;">${h.note}</div>`).join('');
+
+    const bandRows = tl.bands.map(b => {
+        if (b.price !== null && b.price !== undefined) {
+            return `<div style="padding:2px 0; font-size:0.75rem; color:var(--text-secondary);">
+                ${b.name}: <b>${fmt(b.price)}</b>${distBadge(b.distance_pct)}</div>`;
+        }
+        return `<div style="padding:2px 0; font-size:0.75rem; color:var(--text-muted);">
+            ${b.name}: <span style="opacity:0.85;">单靠价格不可达 — 需趋势斜率/慢变量翻转</span></div>`;
+    }).join('');
+
+    const r = tl.reachable;
+    const reachLine = r ? `<div style="color:var(--text-muted); font-size:0.7rem; margin-top:6px;">
+        扫描 −50%~+100%: 评分可达上限 ${r.max.score >= 0 ? '+' : ''}${r.max.score}（${fmt(r.max.price)}, ${r.max.pct >= 0 ? '+' : ''}${r.max.pct}%）·
+        下限 ${r.min.score >= 0 ? '+' : ''}${r.min.score}（${fmt(r.min.price)}, ${r.min.pct >= 0 ? '+' : ''}${r.min.pct}%）
+        — 体系对瞬时价格脱敏，档位转换靠趋势结构而非单日行情</div>` : '';
+
+    el.innerHTML = `
+        <div class="decision-card-title">📐 触发价位表 <span class="decision-freq">机械反解 · 非预测</span></div>
+        ${hardRows}
+        <div style="margin-top:8px; color:var(--text-secondary); font-size:0.78rem; font-weight:600;">评分档位反解（近似，固定慢变量因子）</div>
+        ${bandRows}
+        ${reachLine}
+        <div style="color:var(--text-muted); font-size:0.66rem; margin-top:6px;">${(tl.meta && tl.meta.note) || ''}</div>`;
 }
 
 /**
@@ -1809,14 +1857,14 @@ async function fetchScoreHistory(days) {
         const res = await fetch(`/api/score-history?days=${days || 90}`);
         const data = await res.json();
         if (!data.success) return;
-        renderScoreHistoryChart(data.series || []);
+        renderScoreHistoryChart(data.series || [], data.events || []);
         renderSignalChanges(data.changes || {});
     } catch (e) {
         console.error('Score history fetch failed:', e);
     }
 }
 
-function renderScoreHistoryChart(series) {
+function renderScoreHistoryChart(series, events) {
     const canvas = document.getElementById('scoreHistoryChart');
     const emptyEl = document.getElementById('scoreHistoryEmpty');
     if (!canvas) return;
@@ -1839,6 +1887,33 @@ function renderScoreHistoryChart(series) {
     const prices = series.map(s => s.btc_price);
     const tacticals = series.map(s => (typeof s.tactical_score === 'number' ? s.tactical_score : null));
     const hasTactical = tacticals.some(v => v !== null);
+
+    // 事件标记 (上穿档位/转负/滞回换档): 散点叠加, ▲买入侧 / ▼避险侧。
+    // 事件研究诚实口径: 非胜率信号, tooltip 携带完整说明。
+    const dateIdx = {};
+    series.forEach((s, i) => { dateIdx[s.date] = i; });
+    const evPoint = ev => {
+        const i = dateIdx[ev.date];
+        if (i === undefined) return null;
+        return { x: labels[i], y: series[i].total_score, _ev: ev };
+    };
+    const buyPts = (events || []).filter(e => e.side === 'buy').map(evPoint).filter(Boolean);
+    const riskPts = (events || []).filter(e => e.side === 'risk').map(evPoint).filter(Boolean);
+    const eventDatasets = [];
+    if (buyPts.length) {
+        eventDatasets.push({
+            label: '事件·买入侧', data: buyPts, type: 'scatter', showLine: false,
+            pointStyle: 'triangle', pointRadius: 7, pointHoverRadius: 9, rotation: 0,
+            borderColor: '#00d26a', backgroundColor: '#00d26a99', yAxisID: 'yScore', order: -1,
+        });
+    }
+    if (riskPts.length) {
+        eventDatasets.push({
+            label: '事件·避险侧', data: riskPts, type: 'scatter', showLine: false,
+            pointStyle: 'triangle', pointRadius: 7, pointHoverRadius: 9, rotation: 180,
+            borderColor: '#ff4444', backgroundColor: '#ff444499', yAxisID: 'yScore', order: -1,
+        });
+    }
 
     _scoreHistoryChart = new Chart(canvas, {
         type: 'line',
@@ -1876,7 +1951,8 @@ function renderScoreHistoryChart(series) {
                     fill: false,
                     tension: 0.3,
                     yAxisID: 'yPrice',
-                }
+                },
+                ...eventDatasets
             ]
         },
         options: {
@@ -1890,7 +1966,17 @@ function renderScoreHistoryChart(series) {
                 },
                 tooltip: {
                     callbacks: {
+                        label: (ctx) => {
+                            if (ctx.raw && ctx.raw._ev) return `${ctx.raw._ev.label}`;
+                            return `${ctx.dataset.label}: ${ctx.formattedValue}`; // 复刻默认格式
+                        },
                         afterBody: (items) => {
+                            const evItem = items.find(it => it.raw && it.raw._ev);
+                            if (evItem) {
+                                // 事件研究诚实口径: 每个事件标记必须携带统计力说明
+                                const note = evItem.raw._ev.note || '';
+                                return note.match(/.{1,26}/g) || [];
+                            }
                             const i = items[0].dataIndex;
                             return series[i].recommendation ? `建议: ${series[i].recommendation}` : '';
                         }

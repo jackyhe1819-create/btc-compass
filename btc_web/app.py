@@ -170,6 +170,7 @@ def _do_refresh_dashboard():
             "data_synthetic": result.data_synthetic,
             "cycle_coverage": result.cycle_coverage,
             "tactical_coverage": result.tactical_coverage,
+            "trigger_levels": result.trigger_levels,
             "indicators": indicators_json,
             "sparklines": sparklines
         }
@@ -511,6 +512,16 @@ def api_score_history():
         days = request.args.get('days', 90, type=int)
         days = min(max(days, 7), 365)
         data = get_score_history(_CACHE_DIR, days)
+        # 事件标记 (上穿档位/转负/滞回换档), 每个事件自带诚实统计口径 —
+        # 事件研究结论: 不作为胜率信号, 仅周期叙事参考
+        try:
+            from btc_dashboard.decision import extract_events
+            window_dates = {s["date"] for s in data.get("series", [])}
+            data["events"] = [ev for ev in extract_events(load_history_entries(_CACHE_DIR))
+                              if ev["date"] in window_dates]
+        except Exception as e:
+            print(f"⚠️ 事件标记提取失败: {e}")
+            data["events"] = []
         resp = jsonify({"success": True, **data})
         resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=600'
         return resp

@@ -396,6 +396,15 @@ def run_dashboard() -> DashboardResult:
         recommendation = "🚨 全部价格源失效 — 当前为演示数据, 评分无效, 请勿参考"
         tactical_recommendation = "🚨 演示数据, 评分无效"
 
+    # 触发价位表 (机械反解, 失败不拖垮仪表盘; 合成数据下无意义, 跳过)
+    trigger_levels = None
+    if not data_synthetic:
+        try:
+            from .triggers import compute_trigger_levels
+            trigger_levels = compute_trigger_levels(df, indicators, current_price)
+        except Exception as e:  # Keep broad: 附属面板任何异常不影响主评分。
+            logger.warning("触发价位表计算失败: %s", e)
+
     result = DashboardResult(
         timestamp=datetime.now(),
         btc_price=current_price,
@@ -410,6 +419,7 @@ def run_dashboard() -> DashboardResult:
         data_synthetic=data_synthetic,
         cycle_coverage=scores["cycle_coverage"],
         tactical_coverage=scores["tactical_coverage"],
+        trigger_levels=trigger_levels,
     )
 
     return result
