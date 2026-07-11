@@ -36,7 +36,8 @@ btc_web/cache/
 cache/
 
 # Local-only / IDE / archived directories (不进仓库)
-.claude/
+.claude/*
+!.claude/skills/
 .superpowers/
 _archive/
 _legacy/
