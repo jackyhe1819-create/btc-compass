@@ -2461,16 +2461,8 @@ body::before {
     margin-top: 2px;
 }
 
-/* 周期认知与风险版块 (patterns-section) — 与同级 body 层区块对齐边距 */
-.patterns-section { padding: 0 20px; }
-/* 桌面宽屏下限宽居中, 避免密集小字铺满 1400px 造成超长行 (每行~180字符→~110) */
-@media (min-width: 1024px) {
-    .patterns-section > .decision-card {
-        max-width: 1000px;
-        margin-left: auto;
-        margin-right: auto;
-    }
-}
+/* 周期认知与风险版块 (patterns-section) — 满宽齐边, 卡片左右缘对齐上方长期/短期指标网格 (无内缩) */
+.patterns-section { padding: 0; }
 /* 深度卡折叠头 (路线图/市场规律默认收起, 驯服页面长度) */
 .pattern-collapse { }
 .pattern-summary {

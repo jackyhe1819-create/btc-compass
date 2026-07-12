@@ -16,7 +16,7 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>₿</text></svg>">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-7">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-8">
     <!-- 防止主题闪烁：在 CSS 加载前立即恢复主题（v2: 默认米白色） -->
     <script>
         (function() {
@@ -896,6 +896,23 @@
                 </a>
             </div>
 
+            <!-- 拓展工具 & 资讯 -->
+            <div class="research-group">
+                <div class="research-group-title">🧰 拓展工具 & 资讯</div>
+                <a href="https://option.lianyanshe.com/#/home" target="_blank" rel="noopener noreferrer" class="research-item">
+                    <span class="research-name">链研社 · 加密期权指南</span>
+                    <span class="research-desc">加密期权系统教程 · 策略计算器</span>
+                </a>
+                <a href="https://aihot.virxact.com/" target="_blank" rel="noopener noreferrer" class="research-item">
+                    <span class="research-name">AI HOT</span>
+                    <span class="research-desc">AI 行业动态聚合 · 每日日报</span>
+                </a>
+                <a href="https://finews.elsetech.app/2026-07-06" target="_blank" rel="noopener noreferrer" class="research-item">
+                    <span class="research-name">FiNews 美股日报</span>
+                    <span class="research-desc">AI 整理美股盘后日报</span>
+                </a>
+            </div>
+
         </div>
     </section>
 
@@ -910,7 +927,7 @@
         <p style="margin: 6px 0 0 0; font-size: 0.75rem; color: var(--text-muted);">点击地址即可复制</p>
     </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}?v=compass-7"></script>
+    <script src="{{ url_for('static', filename='script.js') }}?v=compass-8"></script>
 </body>
 
 </html>
