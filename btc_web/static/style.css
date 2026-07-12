@@ -3098,7 +3098,7 @@ body::before {
 .opt-hero-label { font-size:0.78rem; color:var(--text-secondary); }
 .opt-hero-num { font-size:2rem; font-weight:600; color:var(--text-primary); }
 .opt-hero-unit { font-size:0.78rem; color:var(--text-secondary); font-weight:400; }
-.opt-pct { display:inline-block; background:#f0864a1a; color:#f0864a; font-size:0.75rem; padding:3px 9px; border-radius:6px; }
+.opt-pct { display:inline-block; color: var(--accent-btc); background: color-mix(in srgb, var(--accent-btc) 12%, transparent); font-size:0.75rem; padding:3px 9px; border-radius:6px; }
 .opt-spark { display:block; margin:4px 0; }
 .opt-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; margin-top:8px; }
 .opt-tile { background:var(--bg-glass,rgba(255,255,255,0.03)); border-radius:8px; padding:10px; }

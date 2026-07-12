@@ -2580,8 +2580,7 @@ async function renderOptions() {
         `<div class="opt-tile"><div class="opt-tile-label">${label}</div>
          <div class="opt-tile-val">${val}</div><div class="opt-tile-sub">${sub}</div></div>`;
     el.innerHTML = `
-      <div class="decision-card-title">📐 BTC 期权 · 波动率与情绪
-        <span class="decision-freq">Deribit · ${a.updated_at || ''}</span></div>
+      <div style="text-align:right; font-size:0.72rem; color:var(--text-muted); margin-bottom:4px;">Deribit · ${a.updated_at || ''}</div>
       <div class="opt-hero">
         <div><div class="opt-hero-label">DVOL 隐含波动率 · 4年分位</div>
           <div class="opt-hero-num">${a.dvol_now}<span class="opt-hero-unit"> 当前 IV</span></div></div>
@@ -2592,9 +2591,9 @@ async function renderOptions() {
         <polyline points="${pts}" fill="none" stroke="var(--accent-btc,#f0864a)" stroke-width="1.5"
           stroke-linejoin="round" stroke-linecap="round"/></svg>` : ''}
       <div class="opt-grid">
-        ${tile('25Δ 偏斜', a.skew_25d == null ? '—' : (a.skew_25d > 0 ? '+' : '') + a.skew_25d, a.skew_25d > 0 ? '看跌溢价·防御' : '看涨溢价')}
-        ${tile('Put/Call OI', a.put_call_oi == null ? '—' : a.put_call_oi, a.put_call_oi < 1 ? '看涨主导' : '看跌主导')}
-        ${tile('期限结构', a.term_slope == null ? '—' : (a.term_slope > 0 ? '+' : '') + a.term_slope, a.term_slope > 0 ? 'contango' : 'backwardation')}
+        ${tile('25Δ 偏斜', a.skew_25d == null ? '—' : (a.skew_25d > 0 ? '+' : '') + a.skew_25d, a.skew_25d == null ? '' : (a.skew_25d > 0 ? '看跌溢价·防御' : '看涨溢价'))}
+        ${tile('Put/Call OI', a.put_call_oi == null ? '—' : a.put_call_oi, a.put_call_oi == null ? '' : (a.put_call_oi < 1 ? '看涨主导' : '看跌主导'))}
+        ${tile('期限结构', a.term_slope == null ? '—' : (a.term_slope > 0 ? '+' : '') + a.term_slope, a.term_slope == null ? '' : (a.term_slope > 0 ? 'contango' : 'backwardation'))}
         ${tile('最大痛点', a.max_pain == null ? '—' : '$' + a.max_pain.toLocaleString(), a.max_pain_exp || '')}
       </div>
       <div class="opt-foot">DVOL 分位 = 战术分候选因子（回测确认后计分）· 其余仅展示（当下快照）· 现价 $${(a.spot || 0).toLocaleString()}</div>`;
