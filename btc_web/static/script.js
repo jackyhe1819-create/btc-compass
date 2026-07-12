@@ -696,8 +696,8 @@ function renderCycleEvents(a) {
     // 当前相位定位条
     const windows = (cur.active_windows || []).map(w =>
         `<span class="decision-stat-chip" style="background:#f0864a1a; color:#f0864a;">🎯 ${w}</span>`).join(' ');
+    // 折叠摘要保留"当前减半相位"一行, 收起时也能一眼看到大局锚点
     const header = `
-        <div class="decision-card-title">🗓️ 周期相位与事件规律 <span class="decision-freq">n=3~4 · 周期叙事非信号</span></div>
         <div style="font-size:0.82rem; color:var(--text-secondary); margin:4px 0 8px;">
             当前：第 <b>${cur.cycle_no}</b> 周期 · 减半后 <b>${cur.months_since_halving}</b> 月 ·
             距下次减半约 <b>${cur.days_to_next_halving_est}</b> 天
@@ -741,13 +741,16 @@ function renderCycleEvents(a) {
     };
 
     const events = a.events || {};
-    el.innerHTML = header
+    const body = header
         + `<div style="font-size:0.78rem; font-weight:600; color:var(--text-secondary); margin-top:4px;">减半周期相位地图（逐周期，不平均）</div>`
         + phaseRows
         + evBlock('世界杯', events['世界杯'])
         + evBlock('美联储换主席', events['美联储换主席'])
         + evBlock('美国大选', events['美国大选'])
         + `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:8px; border-top:1px solid var(--border-color,#333); padding-top:6px;">${a.honest_note || ''}</div>`;
+    // 默认折叠, 摘要保留当前减半相位一览
+    const sumHint = `减半后 ${cur.months_since_halving} 月${curM >= 18 && curM <= 30 ? ' · 历史熊市段' : ''}`;
+    el.innerHTML = `<details class="pattern-collapse"><summary class="pattern-summary"><span>🗓️ 周期相位与事件规律 <span class="decision-freq" style="font-weight:400;">${sumHint} · 展开</span></span><span class="pattern-chev">▾</span></summary>${body}</details>`;
 }
 
 /**
