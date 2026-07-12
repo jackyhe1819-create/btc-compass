@@ -155,7 +155,9 @@ def _assemble_panel() -> Dict:
         chain, spot = _fetch_chain()
         snap = derive_snapshot(chain, spot, now)
     except Exception:
-        snap, spot, partial = {}, None, True
+        # 空链 + 无 spot -> derive_snapshot 提前在 helper 里对 None 短路，
+        # 不会走到任何 spot 运算，因此始终安全；同时自动保持键集与其真实输出同步。
+        snap, spot, partial = derive_snapshot([], None, now), None, True
     out = {"spot": round(spot) if spot else None,
            "dvol_now": round(dvol_now, 1) if dvol_now else None,
            "dvol_pct": dvol_pct, "dvol_window_days": n, "spark": spark,

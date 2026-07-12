@@ -86,3 +86,27 @@ def test_assemble_panel_from_raw(monkeypatch):
     assert p["dvol_pct"] == 0.0       # strict < : 0/3 <36 (36 是最小值)
     assert p["put_call_oi"] == 3.19
     assert p["partial"] is False
+
+
+def test_assemble_panel_partial_on_chain_failure(monkeypatch):
+    # 期权链拉取失败时，输出字典必须仍含全部快照键 (值为 None)，
+    # 而不是整体缺失这些键 —— 下游 (Flask 路由/前端) 依赖"键存在、值为 None"的降级契约。
+    now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    monkeypatch.setattr(opt, "_now", lambda: now)
+    monkeypatch.setattr(opt, "fetch_dvol_history",
+                        lambda a, b: [(1, 40.0), (2, 38.0), (3, 36.0)])
+
+    def _boom():
+        raise RuntimeError("chain fetch failed")
+    monkeypatch.setattr(opt, "_fetch_chain", _boom)
+
+    result = opt._assemble_panel()
+    assert result["partial"] is True
+    assert result["dvol_now"] == 36.0   # DVOL 侧不受期权链失败影响，仍正常计算
+
+    for key in ("put_call_oi", "skew_25d", "skew_exp", "atm_front", "atm_back",
+                "term_slope", "front_exp", "back_exp", "max_pain", "max_pain_exp",
+                "n_contracts"):
+        assert key in result, f"missing snapshot key: {key}"
+        assert result[key] is None or key == "n_contracts"
+    assert result["n_contracts"] == 0
