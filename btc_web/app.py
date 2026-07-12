@@ -88,6 +88,7 @@ from btc_dashboard import (
 from btc_dashboard.score_history import record_score_snapshot, get_score_history, load_history_entries
 from btc_dashboard.decision import compute_decision
 from btc_dashboard.derivatives import fetch_derivatives_panel
+from btc_dashboard.options import fetch_options_panel
 from btc_dashboard.etf_flow import fetch_etf_flow_history
 
 app = Flask(__name__)
@@ -132,6 +133,13 @@ _derivatives_cache_timestamp = None
 _derivatives_refreshing = False
 _derivatives_lock = threading.Lock()
 _DERIVATIVES_TTL = 600            # 10 分钟
+
+# ── 期权面板缓存（stale-while-revalidate，10 分钟 TTL）──────────────
+_options_cache = None
+_options_cache_timestamp = None
+_options_refreshing = False
+_options_lock = threading.Lock()
+_OPTIONS_TTL = 600                # 10 分钟
 
 
 def _do_refresh_dashboard():
@@ -340,6 +348,34 @@ def trigger_derivatives_refresh():
     t.start()
 
 
+def _do_refresh_options():
+    """在后台线程中刷新期权面板缓存。"""
+    global _options_cache, _options_cache_timestamp, _options_refreshing
+    try:
+        data = fetch_options_panel()
+        _options_cache = data
+        _options_cache_timestamp = datetime.now()
+        _save_cache_to_disk("options", _options_cache, _options_cache_timestamp)
+        print(f"✅ 期权面板缓存刷新完成 {_options_cache_timestamp.strftime('%H:%M:%S')}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"⚠️ 期权面板缓存刷新失败: {e}")
+    finally:
+        _options_refreshing = False
+
+
+def trigger_options_refresh():
+    """触发后台刷新期权面板（若未在刷新中）。"""
+    global _options_refreshing
+    with _options_lock:
+        if _options_refreshing:
+            return
+        _options_refreshing = True
+    t = threading.Thread(target=_do_refresh_options, daemon=True)
+    t.start()
+
+
 def get_cached_btc_data():
     """获取缓存的 BTC 数据"""
     global _btc_data_cache, _btc_data_timestamp
@@ -385,6 +421,13 @@ def _bootstrap_disk_cache():
         _derivatives_cache_timestamp = dv_ts
         print(f"📦 从磁盘恢复衍生品面板缓存（{dv_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
 
+    global _options_cache, _options_cache_timestamp
+    o_data, o_ts = _load_cache_from_disk("options")
+    if o_data is not None:
+        _options_cache = o_data
+        _options_cache_timestamp = o_ts
+        print(f"📦 从磁盘恢复期权面板缓存（{o_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
+
 _bootstrap_disk_cache()
 
 
@@ -396,6 +439,8 @@ def _delayed_warmup():
     trigger_news_refresh()
     _t.sleep(10)
     trigger_derivatives_refresh()
+    _t.sleep(5)
+    trigger_options_refresh()
     _t.sleep(5)
     trigger_builders_refresh()
 
@@ -612,6 +657,41 @@ def api_derivatives():
         "success": False,
         "computing": True,
         "error": "衍生品数据加载中，请稍候…"
+    })
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp, 202
+
+
+@app.route('/api/options')
+def api_options():
+    """
+    API 端点：返回 BTC 期权面板（DVOL/偏斜/看跌看涨比/期限结构/最大痛点）
+    策略：stale-while-revalidate，同 /api/derivatives
+    """
+    global _options_cache, _options_cache_timestamp
+
+    now = datetime.now()
+    cache_age = int((now - _options_cache_timestamp).total_seconds()) if _options_cache_timestamp else None
+    has_cache = _options_cache is not None
+
+    if has_cache:
+        if cache_age is not None and cache_age >= _OPTIONS_TTL:
+            trigger_options_refresh()
+        resp = jsonify({
+            "success": True,
+            "cached": True,
+            "cache_age_s": cache_age,
+            **_options_cache
+        })
+        fresh_left = max(0, _OPTIONS_TTL - (cache_age or 0))
+        return _swr_headers(resp, fresh_left, _OPTIONS_TTL)
+
+    # 无缓存（冷启动）：立即返回 computing 状态，前端负责轮询
+    trigger_options_refresh()
+    resp = jsonify({
+        "success": False,
+        "computing": True,
+        "error": "期权数据加载中，请稍候…"
     })
     resp.headers['Cache-Control'] = 'no-store'
     return resp, 202
