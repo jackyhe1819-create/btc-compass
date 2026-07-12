@@ -1,4 +1,4 @@
-"""Deribit BTC 期权数据: DVOL + 期权链快照派生指标。纯函数 + 带缓存的抓取入口。"""
+"""Deribit BTC 期权数据: DVOL + 期权链快照派生指标。纯函数: 合约名解析 + 期权链快照派生指标计算。"""
 import datetime
 from typing import List, Dict, Tuple
 
@@ -20,14 +20,15 @@ def _nearest_exp(exps: List[datetime.datetime], now: datetime.datetime, min_days
 
 
 def _atm_iv(rows: List[dict], exp, spot: float):
-    cands = [r for r in rows if r["exp"] == exp and r.get("iv")]
+    cands = [r for r in rows if r["exp"] == exp and r.get("iv") is not None]
     if not cands or not spot:
         return None
-    return min(cands, key=lambda r: abs(r["strike"] - spot))["iv"]
+    # tie-break 在 ATM 档位上偏好 call: abs(strike-spot) 相同时 cp=='C' 排前
+    return min(cands, key=lambda r: (abs(r["strike"] - spot), r["cp"] != "C"))["iv"]
 
 
 def _wing_iv(rows, exp, spot, lo, hi, cp):
-    cs = [r for r in rows if r["exp"] == exp and r["cp"] == cp and r.get("iv")
+    cs = [r for r in rows if r["exp"] == exp and r["cp"] == cp and r.get("iv") is not None
           and lo * spot <= r["strike"] <= hi * spot]
     return sum(r["iv"] for r in cs) / len(cs) if cs else None
 
@@ -68,16 +69,17 @@ def derive_snapshot(chain: List[dict], spot: float, now: datetime.datetime) -> D
     atm_back = _atm_iv(rows, back, spot)
     put_wing = _wing_iv(rows, skew_exp, spot, 0.85, 0.95, "P")
     call_wing = _wing_iv(rows, skew_exp, spot, 1.05, 1.15, "C")
+    mp = _max_pain(rows, mp_exp) if mp_exp else None
     fmt = lambda e: e.strftime("%d%b%y") if e else None
     return {
         "put_call_oi": round(poi / coi, 2) if coi else None,
-        "skew_25d": round(put_wing - call_wing, 1) if (put_wing and call_wing) else None,
+        "skew_25d": round(put_wing - call_wing, 1) if (put_wing is not None and call_wing is not None) else None,
         "skew_exp": fmt(skew_exp),
-        "atm_front": round(atm_front, 1) if atm_front else None,
-        "atm_back": round(atm_back, 1) if atm_back else None,
-        "term_slope": round(atm_back - atm_front, 1) if (atm_front and atm_back) else None,
+        "atm_front": round(atm_front, 1) if atm_front is not None else None,
+        "atm_back": round(atm_back, 1) if atm_back is not None else None,
+        "term_slope": round(atm_back - atm_front, 1) if (atm_front is not None and atm_back is not None) else None,
         "front_exp": fmt(front), "back_exp": fmt(back),
-        "max_pain": round(_max_pain(rows, mp_exp)) if mp_exp else None,
+        "max_pain": round(mp) if mp is not None else None,
         "max_pain_exp": fmt(mp_exp),
         "n_contracts": len(rows),
     }
