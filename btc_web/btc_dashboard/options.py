@@ -1,5 +1,9 @@
 """Deribit BTC 期权数据: DVOL + 期权链快照派生指标。纯函数: 合约名解析 + 期权链快照派生指标计算。"""
 import datetime
+import json
+import time
+import urllib.parse
+import urllib.request
 from typing import List, Dict, Tuple
 
 UTC = datetime.timezone.utc
@@ -93,3 +97,78 @@ def calc_dvol_percentile(closes: List[float], current: float,
         return 0.0, 0
     below = sum(1 for x in w if x < current)
     return round(below / len(w) * 100, 1), len(w)
+
+
+_BASE = "https://www.deribit.com/api/v2/public/"
+_panel_cache = {"data": None, "ts": 0.0}
+_PANEL_TTL = 600
+
+
+def _now() -> datetime.datetime:
+    return datetime.datetime.now(UTC)
+
+
+def _get(method: str, **params):
+    url = _BASE + method + "?" + urllib.parse.urlencode(params)
+    with urllib.request.urlopen(url, timeout=20) as r:
+        return json.load(r)["result"]
+
+
+def fetch_dvol_history(start_ms: int, end_ms: int) -> List[Tuple[int, float]]:
+    """分页拉取 DVOL 日线，按时间升序去重返回 (ts_ms, close)。"""
+    pts, end = {}, end_ms
+    for _ in range(8):
+        res = _get("get_volatility_index_data", currency="BTC",
+                   start_timestamp=start_ms, end_timestamp=end, resolution="1D")
+        data = res.get("data", [])
+        if not data:
+            break
+        for row in data:
+            pts[row[0]] = row[4]           # ts -> close
+        earliest = min(r[0] for r in data)
+        if earliest <= start_ms + 86400000 or len(data) < 1000:
+            break
+        end = earliest - 86400000
+    return sorted(pts.items())
+
+
+def _fetch_chain():
+    chain = _get("get_book_summary_by_currency", currency="BTC", kind="option")
+    spot = next((x["underlying_price"] for x in chain if x.get("underlying_price")), None)
+    return chain, spot
+
+
+def _assemble_panel() -> Dict:
+    now = _now()
+    partial = False
+    start = 1609459200000  # 2021-01-01
+    end = int(now.timestamp() * 1000)
+    try:
+        hist = fetch_dvol_history(start, end)
+    except Exception:
+        hist, partial = [], True
+    closes = [v for _, v in hist]
+    dvol_now = closes[-1] if closes else None
+    dvol_pct, n = (calc_dvol_percentile(closes, dvol_now) if dvol_now else (None, 0))
+    spark = [round(v, 1) for _, v in hist[-90:]]
+    try:
+        chain, spot = _fetch_chain()
+        snap = derive_snapshot(chain, spot, now)
+    except Exception:
+        snap, spot, partial = {}, None, True
+    out = {"spot": round(spot) if spot else None,
+           "dvol_now": round(dvol_now, 1) if dvol_now else None,
+           "dvol_pct": dvol_pct, "dvol_window_days": n, "spark": spark,
+           "updated_at": now.strftime("%H:%M"), "partial": partial}
+    out.update(snap)
+    return out
+
+
+def fetch_options_panel() -> Dict:
+    now = time.time()
+    if _panel_cache["data"] and now - _panel_cache["ts"] < _PANEL_TTL:
+        return _panel_cache["data"]
+    data = _assemble_panel()
+    if not data.get("partial"):
+        _panel_cache.update(data=data, ts=now)
+    return data

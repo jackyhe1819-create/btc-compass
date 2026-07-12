@@ -50,6 +50,9 @@ from .whales import (
 )
 from .calendars import fetch_crypto_calendar, fetch_macro_calendar
 
+# 期权（Deribit DVOL + 期权链快照）
+from .options import fetch_options_panel, fetch_dvol_history, calc_dvol_percentile
+
 # 历史时序
 from .history import get_indicator_history
 
@@ -89,6 +92,8 @@ __all__ = [
     "fetch_crypto_news",
     "fetch_exchange_balance_display", "fetch_whale_volume_stats", "fetch_whale_activity",
     "fetch_crypto_calendar", "fetch_macro_calendar",
+    # 期权
+    "fetch_options_panel", "fetch_dvol_history", "calc_dvol_percentile",
     # 历史
     "get_indicator_history",
     # 汇总

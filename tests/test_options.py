@@ -1,5 +1,6 @@
 import datetime
 from btc_dashboard.options import parse_instrument, derive_snapshot, calc_dvol_percentile
+from btc_dashboard import options as opt
 
 UTC = datetime.timezone.utc
 
@@ -71,3 +72,17 @@ def test_dvol_percentile_respects_window():
     pct, n = calc_dvol_percentile(closes, current=1999.0, window=1460)
     assert n == 1460     # 只取尾部 1460
     assert pct == 99.9   # 尾部 541..2000 中 1458 个 <1999 (若误取头部会得 100.0)
+
+
+def test_assemble_panel_from_raw(monkeypatch):
+    now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    monkeypatch.setattr(opt, "_now", lambda: now)
+    monkeypatch.setattr(opt, "fetch_dvol_history",
+                        lambda a, b: [(1, 40.0), (2, 38.0), (3, 36.0)])
+    monkeypatch.setattr(opt, "_fetch_chain",
+                        lambda: (_chain(), 64000.0))
+    p = opt._assemble_panel()
+    assert p["dvol_now"] == 36.0
+    assert p["dvol_pct"] == 0.0       # strict < : 0/3 <36 (36 是最小值)
+    assert p["put_call_oi"] == 3.19
+    assert p["partial"] is False
