@@ -181,6 +181,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => fetchScoreHistory(_scoreHistoryDays), REFRESH_INTERVAL);
     setTimeout(fetchDerivativesData, 2500);
     setInterval(fetchDerivativesData, 10 * 60 * 1000); // 每 10 分钟刷新
+    setTimeout(renderOptions, 2700);
+    setInterval(renderOptions, 10 * 60 * 1000); // 期权面板缓存 TTL 10 分钟，同步刷新
     setTimeout(fetchCycleEvents, 3000);
     setInterval(fetchCycleEvents, 60 * 60 * 1000); // 周期相位慢变，每小时刷新
     setTimeout(fetchRoadmap, 3300);
@@ -2552,6 +2554,50 @@ function renderDerivatives(data) {
             });
         }
     }
+}
+
+/* ============================================================
+   BTC 期权 · 波动率与情绪 (DVOL/偏斜/PC/期限/最大痛点)
+   ============================================================ */
+
+async function renderOptions() {
+    const el = document.getElementById('optionsCard');
+    if (!el) return;
+    let a;
+    try { a = await (await fetch('/api/options')).json(); }
+    catch (e) { return; }
+    if (!a || a.dvol_now == null) return;
+    el.style.display = '';
+    const spark = (a.spark || []);
+    let pts = '';
+    if (spark.length >= 2) {
+        const min = Math.min(...spark), max = Math.max(...spark), W = 320, H = 40, pad = 3;
+        pts = spark.map((v, i) =>
+            `${(i / (spark.length - 1) * W).toFixed(1)},${(H - pad - (v - min) / (max - min || 1) * (H - 2 * pad)).toFixed(1)}`).join(' ');
+    }
+    const W = 320, H = 40;
+    const tile = (label, val, sub) =>
+        `<div class="opt-tile"><div class="opt-tile-label">${label}</div>
+         <div class="opt-tile-val">${val}</div><div class="opt-tile-sub">${sub}</div></div>`;
+    el.innerHTML = `
+      <div class="decision-card-title">📐 BTC 期权 · 波动率与情绪
+        <span class="decision-freq">Deribit · ${a.updated_at || ''}</span></div>
+      <div class="opt-hero">
+        <div><div class="opt-hero-label">DVOL 隐含波动率 · 4年分位</div>
+          <div class="opt-hero-num">${a.dvol_now}<span class="opt-hero-unit"> 当前 IV</span></div></div>
+        <div style="text-align:right;">
+          <span class="opt-pct">4年分位 ${a.dvol_pct == null ? '—' : a.dvol_pct + '%'}</span></div>
+      </div>
+      ${pts ? `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" class="opt-spark">
+        <polyline points="${pts}" fill="none" stroke="var(--accent-btc,#f0864a)" stroke-width="1.5"
+          stroke-linejoin="round" stroke-linecap="round"/></svg>` : ''}
+      <div class="opt-grid">
+        ${tile('25Δ 偏斜', a.skew_25d == null ? '—' : (a.skew_25d > 0 ? '+' : '') + a.skew_25d, a.skew_25d > 0 ? '看跌溢价·防御' : '看涨溢价')}
+        ${tile('Put/Call OI', a.put_call_oi == null ? '—' : a.put_call_oi, a.put_call_oi < 1 ? '看涨主导' : '看跌主导')}
+        ${tile('期限结构', a.term_slope == null ? '—' : (a.term_slope > 0 ? '+' : '') + a.term_slope, a.term_slope > 0 ? 'contango' : 'backwardation')}
+        ${tile('最大痛点', a.max_pain == null ? '—' : '$' + a.max_pain.toLocaleString(), a.max_pain_exp || '')}
+      </div>
+      <div class="opt-foot">DVOL 分位 = 战术分候选因子（回测确认后计分）· 其余仅展示（当下快照）· 现价 $${(a.spot || 0).toLocaleString()}</div>`;
 }
 
 /* ============================================================
