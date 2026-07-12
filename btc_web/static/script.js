@@ -2596,7 +2596,7 @@ async function renderOptions() {
         ${tile('期限结构', a.term_slope == null ? '—' : (a.term_slope > 0 ? '+' : '') + a.term_slope, a.term_slope == null ? '' : (a.term_slope > 0 ? 'contango' : 'backwardation'))}
         ${tile('最大痛点', a.max_pain == null ? '—' : '$' + a.max_pain.toLocaleString(), a.max_pain_exp || '')}
       </div>
-      <div class="opt-foot">DVOL 分位 = 战术分候选因子（回测确认后计分）· 其余仅展示（当下快照）· 现价 $${(a.spot || 0).toLocaleString()}</div>`;
+      <div class="opt-foot">全部仅展示 · DVOL 分位回测 IC 不足（|IC|≤0.05 且方向不稳），未计入战术分 · 当下快照 · 现价 $${(a.spot || 0).toLocaleString()}</div>`;
 }
 
 /* ============================================================
