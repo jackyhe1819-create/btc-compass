@@ -63,10 +63,11 @@ def test_dvol_percentile_full_window():
     closes = [float(i) for i in range(1, 101)]  # 1..100
     pct, n = calc_dvol_percentile(closes, current=25.0, window=1460)
     assert n == 100
-    assert pct == 25.0   # 25 个 <=25
+    assert pct == 24.0   # 24 个 <25 (严格小于)
 
 
 def test_dvol_percentile_respects_window():
     closes = [float(i) for i in range(1, 2001)]  # 2000 点
     pct, n = calc_dvol_percentile(closes, current=1999.0, window=1460)
     assert n == 1460     # 只取尾部 1460
+    assert pct == 99.9   # 尾部 541..2000 中 1458 个 <1999 (若误取头部会得 100.0)

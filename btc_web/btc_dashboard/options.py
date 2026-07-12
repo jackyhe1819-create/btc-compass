@@ -91,5 +91,5 @@ def calc_dvol_percentile(closes: List[float], current: float,
     w = closes[-window:] if len(closes) >= window else list(closes)
     if not w:
         return 0.0, 0
-    below = sum(1 for x in w if x <= current)
+    below = sum(1 for x in w if x < current)
     return round(below / len(w) * 100, 1), len(w)
