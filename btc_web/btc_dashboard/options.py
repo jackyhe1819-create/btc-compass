@@ -83,3 +83,13 @@ def derive_snapshot(chain: List[dict], spot: float, now: datetime.datetime) -> D
         "max_pain_exp": fmt(mp_exp),
         "n_contracts": len(rows),
     }
+
+
+def calc_dvol_percentile(closes: List[float], current: float,
+                         window: int = 1460) -> Tuple[float, int]:
+    """4年滚动分位数：返回 (分位 0-100, 用到的样本数)。"""
+    w = closes[-window:] if len(closes) >= window else list(closes)
+    if not w:
+        return 0.0, 0
+    below = sum(1 for x in w if x <= current)
+    return round(below / len(w) * 100, 1), len(w)

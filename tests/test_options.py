@@ -1,5 +1,5 @@
 import datetime
-from btc_dashboard.options import parse_instrument, derive_snapshot
+from btc_dashboard.options import parse_instrument, derive_snapshot, calc_dvol_percentile
 
 UTC = datetime.timezone.utc
 
@@ -57,3 +57,16 @@ def test_max_pain_none_when_eligible_expiry_has_zero_oi():
     ]
     m = derive_snapshot(chain, 64000.0, now)
     assert m["max_pain"] is None
+
+
+def test_dvol_percentile_full_window():
+    closes = [float(i) for i in range(1, 101)]  # 1..100
+    pct, n = calc_dvol_percentile(closes, current=25.0, window=1460)
+    assert n == 100
+    assert pct == 25.0   # 25 个 <=25
+
+
+def test_dvol_percentile_respects_window():
+    closes = [float(i) for i in range(1, 2001)]  # 2000 点
+    pct, n = calc_dvol_percentile(closes, current=1999.0, window=1460)
+    assert n == 1460     # 只取尾部 1460
