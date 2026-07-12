@@ -58,3 +58,6 @@ exchange_balance_history.json
 
 # 回测中间产物 (可由 run_backtest.py 再生成; 报告与图表入库)
 backtest/output/*.csv
+
+# DVOL 日线历史 (运行时每日增量写入, 非入库数据; 可由 backfill_dvol() 重建)
+btc_web/btc_dashboard/data/dvol_history.json

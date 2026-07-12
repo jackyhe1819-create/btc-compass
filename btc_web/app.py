@@ -450,15 +450,25 @@ threading.Thread(target=_delayed_warmup, daemon=True).start()
 # ── 评分历史回填（幂等, 一次性; 失败每 30 分钟重试, 最多 8 次）────────
 def _backfill_worker():
     import time as _t
-    from btc_dashboard.backfill import ensure_backfilled
+    from btc_dashboard.backfill import ensure_backfilled, backfill_dvol
     _t.sleep(30)  # 错开预热高峰, 给 bitcoin-data.com 限额留余量
     for attempt in range(8):
         try:
             ensure_backfilled(_CACHE_DIR, days=90)
-            return
+            break
         except Exception as e:
             print(f"⚠️ 评分历史回填失败 (第 {attempt+1}/8 次): {e}")
             _t.sleep(1800)
+
+    # DVOL 日线回填（独立 try/except：DVOL 拉取失败不应影响/阻塞评分历史回填，
+    # 也不参与上面的 8 次重试；写入 btc_dashboard/data/dvol_history.json，
+    # 持久参考数据，非 _CACHE_DIR 里的运行时缓存）
+    try:
+        n = backfill_dvol()
+        if n:
+            print(f"✅ DVOL 历史回填完成: 新增 {n} 点")
+    except Exception as e:
+        print(f"⚠️ DVOL 历史回填失败: {e}")
 
 threading.Thread(target=_backfill_worker, daemon=True).start()
 

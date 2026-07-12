@@ -110,3 +110,13 @@ def test_assemble_panel_partial_on_chain_failure(monkeypatch):
         assert key in result, f"missing snapshot key: {key}"
         assert result[key] is None or key == "n_contracts"
     assert result["n_contracts"] == 0
+
+
+def test_backfill_dvol_idempotent(tmp_path, monkeypatch):
+    from btc_dashboard import backfill
+    monkeypatch.setattr(backfill, "fetch_dvol_history",
+                        lambda a, b: [(1000, 40.0), (2000, 38.0)])
+    n1 = backfill.backfill_dvol(str(tmp_path))
+    n2 = backfill.backfill_dvol(str(tmp_path))
+    assert n1 == 2
+    assert n2 == 0  # 二次无新点

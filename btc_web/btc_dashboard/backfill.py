@@ -36,6 +36,7 @@ from .scoring import (
     cycle_recommendation, PERCENTILE_WINDOW,
 )
 from .score_history import _load_history, _save_history, history_write_lock
+from .options import fetch_dvol_history
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
             "Accept": "application/json"}
@@ -655,6 +656,50 @@ def ensure_backfilled(cache_dir: str, days: int = 90) -> bool:
             pass
     print(f"✅ 评分历史回填完成: 新增 {len(new_entries)} 天, 合计 {len(final)} 天")
     return True
+
+
+# ============================================================
+# DVOL 日线回填 (data/dvol_history.json，持久参考数据，非缓存)
+# ============================================================
+
+_DVOL_VERSION = "v1"
+_DVOL_START_MS = 1616544000000  # 2021-03-24
+
+
+def backfill_dvol(data_dir: str = None) -> int:
+    """
+    幂等把 Deribit DVOL 日线 (2021-03→今) 写入 data/dvol_history.json
+    (`{"version":"v1","series":[[ts,close],...]}`)，返回本次新增点数。
+    已存在且 marker 版本一致则只增量补齐尾部；不传 data_dir 时默认写入
+    模块相对的 btc_dashboard/data/ 目录 (与 band_stats.json 同目录) ——
+    这是持久参考数据，不是可随时清空重建的运行时缓存。
+    """
+    if data_dir is None:
+        data_dir = os.path.join(os.path.dirname(__file__), "data")
+    path = os.path.join(data_dir, "dvol_history.json")
+    existing = {}
+    if os.path.exists(path):
+        try:
+            doc = json.load(open(path))
+            if doc.get("version") == _DVOL_VERSION:
+                existing = {int(ts): v for ts, v in doc.get("series", [])}
+        except Exception:
+            existing = {}
+    start = (max(existing) + 86400000) if existing else _DVOL_START_MS
+    end = int(time.time() * 1000)
+    new_pts = fetch_dvol_history(start, end) if end > start else []
+    added = 0
+    for ts, v in new_pts:
+        if ts not in existing:
+            existing[ts] = v
+            added += 1
+    if added:
+        series = sorted(existing.items())
+        os.makedirs(data_dir, exist_ok=True)
+        tmp = path + ".tmp"
+        json.dump({"version": _DVOL_VERSION, "series": series}, open(tmp, "w"))
+        os.replace(tmp, path)
+    return added
 
 
 if __name__ == "__main__":
