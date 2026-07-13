@@ -332,6 +332,26 @@ def probe_runtime(base_url) -> None:
     except Exception as e:
         _report("WARN", f"/api/score-history 探测失败: {e}")
 
+    # 期权/概率分布面板存活 (SWR 展示卡: 200=有缓存, 202=冷启动 computing; 只 WARN 不翻退出码)
+    for path, label, req_keys in (
+            ("/api/options", "期权面板", ("dvol_now", "n_contracts")),
+            ("/api/probdist", "概率分布面板", ("median", "pdf"))):
+        try:
+            d = _fetch_json(f"{base_url}{path}")
+        except Exception as e:
+            _report("WARN", f"{path} 探测失败: {e}")
+            continue
+        if d.get("computing"):
+            _report("WARN", f"{label}冷启动 computing 中 (部署后首个 TTL 内属正常)")
+            continue
+        if d.get("partial"):
+            _report("WARN", f"{label}为 partial (数据源部分失败) — 持续出现说明上游断供")
+        dead = [k for k in req_keys if d.get(k) in (None, [], 0)]
+        if dead:
+            _report("WARN", f"{label}关键字段缺失/为空: {', '.join(dead)}")
+        else:
+            _report("OK", f"{label}存活 ({', '.join(req_keys)})")
+
     # 趋势记忆: 记录本轮指标 + 与历史比对劣化轨迹 (best-effort, 只 WARN, 不翻退出码)
     try:
         rec = _probe_metrics(base_url, data, indicators, scoring)
