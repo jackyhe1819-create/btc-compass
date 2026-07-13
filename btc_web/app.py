@@ -361,6 +361,17 @@ def _do_refresh_options():
     global _options_cache, _options_cache_timestamp, _options_refreshing
     try:
         data = fetch_options_panel()
+        if data.get("partial"):
+            if _options_cache and not _options_cache.get("partial"):
+                # 保留旧完整缓存, 回拨时间戳 → 约 2 分钟后自动重试(照 builders 先例)
+                _options_cache_timestamp = datetime.now() - timedelta(seconds=_OPTIONS_TTL - 120)
+                print("⚠️ 期权面板刷新为 partial, 保留旧完整缓存, 2 分钟后重试")
+                return
+            _options_cache = data
+            _options_cache_timestamp = datetime.now() - timedelta(seconds=_OPTIONS_TTL - 120)
+            _save_cache_to_disk("options", _options_cache, _options_cache_timestamp)
+            print("⚠️ 期权面板为 partial(无旧缓存), 2 分钟后重试")
+            return
         _options_cache = data
         _options_cache_timestamp = datetime.now()
         _save_cache_to_disk("options", _options_cache, _options_cache_timestamp)
@@ -389,6 +400,17 @@ def _do_refresh_probdist():
     global _probdist_cache, _probdist_cache_timestamp, _probdist_refreshing
     try:
         data = fetch_probdist_panel()
+        if data.get("partial"):
+            if _probdist_cache and not _probdist_cache.get("partial"):
+                # 保留旧完整缓存, 回拨时间戳 → 约 2 分钟后自动重试(照 builders 先例)
+                _probdist_cache_timestamp = datetime.now() - timedelta(seconds=_PROBDIST_TTL - 120)
+                print("⚠️ 概率分布面板刷新为 partial, 保留旧完整缓存, 2 分钟后重试")
+                return
+            _probdist_cache = data
+            _probdist_cache_timestamp = datetime.now() - timedelta(seconds=_PROBDIST_TTL - 120)
+            _save_cache_to_disk("probdist", _probdist_cache, _probdist_cache_timestamp)
+            print("⚠️ 概率分布面板为 partial(无旧缓存), 2 分钟后重试")
+            return
         _probdist_cache = data
         _probdist_cache_timestamp = datetime.now()
         _save_cache_to_disk("probdist", _probdist_cache, _probdist_cache_timestamp)

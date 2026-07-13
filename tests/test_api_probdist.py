@@ -26,3 +26,21 @@ def test_probdist_cold_start(monkeypatch):
     monkeypatch.setattr(appmod, "trigger_probdist_refresh", lambda: None)   # 避免真网络后台线程
     r = app.test_client().get("/api/probdist")
     assert r.status_code == 202 and r.get_json().get("computing") is True
+
+
+def test_do_refresh_probdist_keeps_good_cache_on_partial(monkeypatch):
+    # partial 空壳不得覆盖既有完整缓存: 保旧数据 + 回拨时间戳 + 不落盘(与 options 同款守卫)
+    good = {"median": 64000, "partial": False}
+    monkeypatch.setattr(appmod, "_probdist_cache", good)
+    monkeypatch.setattr(appmod, "_probdist_cache_timestamp", datetime.datetime.now())
+    monkeypatch.setattr(appmod, "fetch_probdist_panel",
+                        lambda: {"median": None, "partial": True})
+    saved = []
+    monkeypatch.setattr(appmod, "_save_cache_to_disk", lambda *a: saved.append(a))
+
+    appmod._do_refresh_probdist()
+
+    assert appmod._probdist_cache is good
+    assert saved == []
+    age = (datetime.datetime.now() - appmod._probdist_cache_timestamp).total_seconds()
+    assert age >= appmod._PROBDIST_TTL - 130
