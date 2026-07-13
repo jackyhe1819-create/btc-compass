@@ -40,3 +40,77 @@ def fit_smile(strikes: List[float], ivs: List[float], F: float) -> Callable[[flo
         xk = min(max(xk, xlo), xhi)               # wing 平推, 防多项式发散
         return max(0.01, float(np.polyval(coefs, xk)))
     return sigma
+
+
+from .options import parse_instrument
+
+_GRID_N = 400
+
+
+def risk_neutral_density(chain: List[dict], spot: float,
+                         now: datetime.datetime) -> Optional[dict]:
+    if not spot or spot <= 0:
+        return None
+    rows = []
+    for x in chain:
+        try:
+            exp, K, cp = parse_instrument(x["instrument_name"])
+            if x.get("mark_iv"):
+                rows.append((exp, K, x["mark_iv"] / 100.0))
+        except Exception:
+            pass
+    if not rows:
+        return None
+    exp = nearest_monthly([e for e, _, _ in rows], now)
+    if exp is None:
+        return None
+    iv_by_K = {}
+    for e, K, iv in rows:
+        if e == exp:
+            iv_by_K.setdefault(K, iv)
+    if len(iv_by_K) < 5:
+        return None
+    F = float(spot)
+    T = (exp - now).total_seconds() / (365.25 * 86400)
+    Ks = sorted(iv_by_K)
+    try:
+        sigma = fit_smile(Ks, [iv_by_K[k] for k in Ks], F)
+        grid = np.linspace(Ks[0], Ks[-1], _GRID_N)
+        C = np.array([_black76_call(F, float(K), T, sigma(float(K))) for K in grid])
+        dK = grid[1] - grid[0]
+        pdf = np.zeros(_GRID_N)
+        pdf[1:-1] = np.maximum((C[2:] - 2 * C[1:-1] + C[:-2]) / (dK * dK), 0.0)
+        area = float(np.trapz(pdf, grid))
+        if not (area > 0) or not np.isfinite(area):
+            return None
+        pdf = pdf / area
+    except Exception:
+        return None
+    cdf = np.concatenate([[0.0], np.cumsum((pdf[1:] + pdf[:-1]) / 2 * dK)])
+
+    def q(p):
+        i = int(np.searchsorted(cdf, p))
+        return float(grid[min(i, _GRID_N - 1)])
+
+    def P_gt(x):
+        i = int(np.searchsorted(grid, x))
+        return round(float(1 - cdf[min(i, _GRID_N - 1)]) * 100, 1)
+
+    median, p16, p84 = q(0.5), q(0.16), q(0.84)
+    mode = float(grid[int(np.argmax(pdf))])
+    mean = float(np.trapz(grid * pdf, grid))
+    base = 5000
+    lo = int(math.floor(spot * 0.85 / base) * base)
+    hi = int(math.ceil(spot * 1.15 / base) * base)
+    tails = [{"K": k, "P_gt": P_gt(k)} for k in range(lo, hi + 1, base)]
+    step = max(1, _GRID_N // 70)
+    pdf_pts = [[round(float(grid[i])), round(float(pdf[i]), 8)]
+               for i in range(0, _GRID_N, step)]
+    return {
+        "expiry": exp.strftime("%d%b%y"), "days": (exp - now).days,
+        "spot": round(spot), "forward": round(F),
+        "pdf": pdf_pts, "median": round(median), "mode": round(mode), "mean": round(mean),
+        "p16": round(p16), "p84": round(p84),
+        "expected_move_pct": round((p84 - p16) / 2 / F * 100, 1),
+        "p_up": P_gt(spot), "tails": tails,
+    }
