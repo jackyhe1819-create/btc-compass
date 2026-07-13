@@ -48,12 +48,15 @@ def test_rnd_flat_smile_integrates_and_shapes():
     # 中位在 forward 附近
     assert 0.9*60000 <= r["median"] <= 1.1*60000
 
-def test_rnd_put_skew_shifts_downside():
+def test_rnd_put_skew_lifts_median_vs_flat():
     now = datetime.datetime(2026, 7, 13, tzinfo=UTC)
     strikes = list(range(40000, 90001, 5000))
-    skew = {k: 0.60 + max(0, (60000-k))/60000*0.5 for k in strikes}   # 低行权价 IV 更高(put贵)
-    r = risk_neutral_density(_synth_chain(ivs=skew), 60000, now)
-    assert r is not None and r["p_up"] < 50.0        # 左偏 → 上涨概率<50%
+    flat = risk_neutral_density(_synth_chain(), 60000, now)                 # 平坦 0.60
+    skew_ivs = {k: 0.60 - 0.5 * math.log(k / 60000) for k in strikes}       # 平滑单调 put-skew (低行权价 IV 更高)
+    skew = risk_neutral_density(_synth_chain(ivs=skew_ivs), 60000, now)
+    assert flat is not None and skew is not None
+    # put skew 使左尾变厚; 风险中性均值恒=F, 故中位相对 flat 右移。若 RND 忽略 smile, 两者中位相等 → 本测试红。
+    assert skew["median"] > flat["median"]
 
 def test_rnd_too_few_strikes_returns_none():
     now = datetime.datetime(2026, 7, 13, tzinfo=UTC)
