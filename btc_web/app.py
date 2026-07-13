@@ -89,6 +89,7 @@ from btc_dashboard.score_history import record_score_snapshot, get_score_history
 from btc_dashboard.decision import compute_decision
 from btc_dashboard.derivatives import fetch_derivatives_panel
 from btc_dashboard.options import fetch_options_panel
+from btc_dashboard.probdist import fetch_probdist_panel
 from btc_dashboard.etf_flow import fetch_etf_flow_history
 
 app = Flask(__name__)
@@ -140,6 +141,13 @@ _options_cache_timestamp = None
 _options_refreshing = False
 _options_lock = threading.Lock()
 _OPTIONS_TTL = 600                # 10 分钟
+
+# ── 概率分布面板缓存（stale-while-revalidate，10 分钟 TTL）──────────
+_probdist_cache = None
+_probdist_cache_timestamp = None
+_probdist_refreshing = False
+_probdist_lock = threading.Lock()
+_PROBDIST_TTL = 600                # 10 分钟
 
 
 def _do_refresh_dashboard():
@@ -376,6 +384,34 @@ def trigger_options_refresh():
     t.start()
 
 
+def _do_refresh_probdist():
+    """在后台线程中刷新概率分布面板缓存。"""
+    global _probdist_cache, _probdist_cache_timestamp, _probdist_refreshing
+    try:
+        data = fetch_probdist_panel()
+        _probdist_cache = data
+        _probdist_cache_timestamp = datetime.now()
+        _save_cache_to_disk("probdist", _probdist_cache, _probdist_cache_timestamp)
+        print(f"✅ 概率分布面板缓存刷新完成 {_probdist_cache_timestamp.strftime('%H:%M:%S')}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"⚠️ 概率分布面板缓存刷新失败: {e}")
+    finally:
+        _probdist_refreshing = False
+
+
+def trigger_probdist_refresh():
+    """触发后台刷新概率分布面板（若未在刷新中）。"""
+    global _probdist_refreshing
+    with _probdist_lock:
+        if _probdist_refreshing:
+            return
+        _probdist_refreshing = True
+    t = threading.Thread(target=_do_refresh_probdist, daemon=True)
+    t.start()
+
+
 def get_cached_btc_data():
     """获取缓存的 BTC 数据"""
     global _btc_data_cache, _btc_data_timestamp
@@ -428,6 +464,13 @@ def _bootstrap_disk_cache():
         _options_cache_timestamp = o_ts
         print(f"📦 从磁盘恢复期权面板缓存（{o_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
 
+    global _probdist_cache, _probdist_cache_timestamp
+    p_data, p_ts = _load_cache_from_disk("probdist")
+    if p_data is not None:
+        _probdist_cache = p_data
+        _probdist_cache_timestamp = p_ts
+        print(f"📦 从磁盘恢复概率分布面板缓存（{p_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
+
 _bootstrap_disk_cache()
 
 
@@ -441,6 +484,8 @@ def _delayed_warmup():
     trigger_derivatives_refresh()
     _t.sleep(5)
     trigger_options_refresh()
+    _t.sleep(5)
+    trigger_probdist_refresh()
     _t.sleep(5)
     trigger_builders_refresh()
 
@@ -702,6 +747,41 @@ def api_options():
         "success": False,
         "computing": True,
         "error": "期权数据加载中，请稍候…"
+    })
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp, 202
+
+
+@app.route('/api/probdist')
+def api_probdist():
+    """
+    API 端点：返回 BTC 价格概率分布面板（风险中性密度/Polymarket 隐含概率）
+    策略：stale-while-revalidate，同 /api/options
+    """
+    global _probdist_cache, _probdist_cache_timestamp
+
+    now = datetime.now()
+    cache_age = int((now - _probdist_cache_timestamp).total_seconds()) if _probdist_cache_timestamp else None
+    has_cache = _probdist_cache is not None
+
+    if has_cache:
+        if cache_age is not None and cache_age >= _PROBDIST_TTL:
+            trigger_probdist_refresh()
+        resp = jsonify({
+            "success": True,
+            "cached": True,
+            "cache_age_s": cache_age,
+            **_probdist_cache
+        })
+        fresh_left = max(0, _PROBDIST_TTL - (cache_age or 0))
+        return _swr_headers(resp, fresh_left, _PROBDIST_TTL)
+
+    # 无缓存（冷启动）：立即返回 computing 状态，前端负责轮询
+    trigger_probdist_refresh()
+    resp = jsonify({
+        "success": False,
+        "computing": True,
+        "error": "概率分布数据加载中，请稍候…"
     })
     resp.headers['Cache-Control'] = 'no-store'
     return resp, 202
