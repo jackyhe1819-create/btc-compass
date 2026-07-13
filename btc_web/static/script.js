@@ -2562,22 +2562,43 @@ function renderDerivatives(data) {
    BTC 期权 · 波动率与情绪 (DVOL/偏斜/PC/期限/最大痛点)
    ============================================================ */
 
+let optSparkSpan = '90d';   // DVOL sparkline 跨度状态(跨 10min 自动重渲染保持)
+let _optionsData = null;    // 最近一次 /api/options 数据(切换跨度免重新 fetch)
+
+function setOptSparkSpan(span) {
+    optSparkSpan = span;
+    if (_optionsData) renderOptionsCard(_optionsData);
+}
+
 async function renderOptions() {
-    const el = document.getElementById('optionsCard');
-    if (!el) return;
     let a;
     try { a = await (await fetch('/api/options')).json(); }
     catch (e) { return; }
     if (!a || a.dvol_now == null) return;
+    _optionsData = a;
+    renderOptionsCard(a);
+}
+
+function renderOptionsCard(a) {
+    const el = document.getElementById('optionsCard');
+    if (!el) return;
     el.style.display = '';
-    const spark = (a.spark || []);
+    const hasFull = (a.spark_full || []).length >= 2;
+    const useFull = optSparkSpan === 'all' && hasFull;
+    const spark = useFull ? a.spark_full : (a.spark || []);
     let pts = '';
+    const W = 320, H = 40;
     if (spark.length >= 2) {
-        const min = Math.min(...spark), max = Math.max(...spark), W = 320, H = 40, pad = 3;
+        const min = Math.min(...spark), max = Math.max(...spark), pad = 3;
         pts = spark.map((v, i) =>
             `${(i / (spark.length - 1) * W).toFixed(1)},${(H - pad - (v - min) / (max - min || 1) * (H - 2 * pad)).toFixed(1)}`).join(' ');
     }
-    const W = 320, H = 40;
+    const caption = useFull ? `自 ${a.spark_full_start || '2021-03'} · DVOL 全史` : '近 90 天';
+    const toggle = hasFull ? `
+        <span class="opt-span-toggle">
+          <button class="opt-span-btn ${useFull ? '' : 'active'}" onclick="setOptSparkSpan('90d')">90d</button>
+          <button class="opt-span-btn ${useFull ? 'active' : ''}" onclick="setOptSparkSpan('all')">全部</button>
+        </span>` : '';
     const tile = (label, val, sub) =>
         `<div class="opt-tile"><div class="opt-tile-label">${label}</div>
          <div class="opt-tile-val">${val}</div><div class="opt-tile-sub">${sub}</div></div>`;
@@ -2589,6 +2610,7 @@ async function renderOptions() {
         <div style="text-align:right;">
           <span class="opt-pct">4年分位 ${a.dvol_pct == null ? '—' : a.dvol_pct + '%'}</span></div>
       </div>
+      <div class="opt-spark-bar"><span class="opt-spark-caption">${caption}</span>${toggle}</div>
       ${pts ? `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" class="opt-spark">
         <polyline points="${pts}" fill="none" stroke="var(--accent-btc,#f0864a)" stroke-width="1.5"
           stroke-linejoin="round" stroke-linecap="round"/></svg>` : ''}

@@ -3106,6 +3106,11 @@ body::before {
 .opt-tile-val { font-size:1.1rem; font-weight:600; color:var(--text-primary); margin-top:2px; }
 .opt-tile-sub { font-size:0.68rem; color:var(--text-muted); margin-top:2px; }
 .opt-foot { font-size:0.68rem; color:var(--text-muted); margin-top:10px; border-top:1px solid var(--border-color,#333); padding-top:6px; line-height:1.5; }
+.opt-spark-bar { display:flex; align-items:center; justify-content:space-between; margin-top:6px; }
+.opt-spark-caption { font-size:0.68rem; color:var(--text-muted); }
+.opt-span-toggle { display:inline-flex; gap:4px; }
+.opt-span-btn { font-size:0.68rem; padding:2px 8px; border-radius:6px; border:1px solid var(--border-color,#333); background:transparent; color:var(--text-secondary); cursor:pointer; }
+.opt-span-btn.active { color:var(--accent-btc); background:color-mix(in srgb, var(--accent-btc) 12%, transparent); border-color:transparent; }
 
 /* BTC 概率分布 (期权隐含风险中性密度) */
 .prob-stats { display:flex; gap:16px; flex-wrap:wrap; margin:6px 0 8px; }
