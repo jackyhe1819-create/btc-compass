@@ -168,7 +168,7 @@ def _now() -> datetime.datetime:
 
 
 def _fetch_chain_cached():
-    return _fetch_chain()          # 复用 options 的链抓取(自带缓存)
+    return _fetch_chain()          # 复用 options 的链抓取(无链级缓存; 缓存在面板层, 故与期权面板各拉一次链)
 
 
 def _assemble_probdist() -> dict:
