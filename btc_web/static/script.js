@@ -183,6 +183,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(fetchDerivativesData, 10 * 60 * 1000); // 每 10 分钟刷新
     setTimeout(renderOptions, 2700);
     setInterval(renderOptions, 10 * 60 * 1000); // 期权面板缓存 TTL 10 分钟，同步刷新
+    setTimeout(renderProbDist, 3000);
+    setInterval(renderProbDist, 600000); // 概率分布面板缓存 TTL 10 分钟，同步刷新
     setTimeout(fetchCycleEvents, 3000);
     setInterval(fetchCycleEvents, 60 * 60 * 1000); // 周期相位慢变，每小时刷新
     setTimeout(fetchRoadmap, 3300);
@@ -2597,6 +2599,61 @@ async function renderOptions() {
         ${tile('最大痛点', a.max_pain == null ? '—' : '$' + a.max_pain.toLocaleString(), a.max_pain_exp || '')}
       </div>
       <div class="opt-foot">全部仅展示 · DVOL 分位回测 IC 不足（|IC|≤0.05 且方向不稳），未计入战术分 · 当下快照 · 现价 $${(a.spot || 0).toLocaleString()}</div>`;
+}
+
+/* ============================================================
+   BTC 概率分布（期权隐含风险中性密度）
+   ============================================================ */
+
+async function renderProbDist() {
+    const el = document.getElementById('probDistCard');
+    if (!el) return;
+    let a; try { a = await (await fetch('/api/probdist')).json(); } catch (e) { return; }
+    if (!a || a.median == null || !Array.isArray(a.pdf) || a.pdf.length < 3) return;
+    el.style.display = '';
+    const W = 640, H = 190, padT = 14, padB = 24, padX = 10;
+    const xs = a.pdf.map(p => p[0]), ys = a.pdf.map(p => p[1]);
+    const xmin = Math.min(...xs), xmax = Math.max(...xs), dmax = Math.max(...ys) || 1;
+    const X = v => padX + (v - xmin) / (xmax - xmin || 1) * (W - 2 * padX);
+    const Y = d => (H - padB) - d / dmax * (H - padT - padB);
+    const area = `M ${X(xs[0]).toFixed(1)} ${H - padB} ` +
+        a.pdf.map(p => `L ${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(' ') +
+        ` L ${X(xs[xs.length - 1]).toFixed(1)} ${H - padB} Z`;
+    const line = 'M ' + a.pdf.map(p => `${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(' L ');
+    const acc = 'var(--accent-btc,#f0864a)';
+    const band = (a.p16 != null && a.p84 != null)
+        ? `<rect x="${X(a.p16).toFixed(1)}" y="${padT}" width="${(X(a.p84) - X(a.p16)).toFixed(1)}" height="${H - padB - padT}" fill="${acc}" opacity="0.10"/>` : '';
+    const spotX = X(a.spot);
+    const ticks = [];
+    for (let k = Math.ceil(xmin / 5000) * 5000; k <= xmax; k += 5000)
+        ticks.push(`<text x="${X(k).toFixed(1)}" y="${H - 8}" font-size="10" fill="var(--text-muted)" text-anchor="middle">$${k / 1000}k</text>`);
+    const chip = (l, v) => `<span class="prob-chip">${l} <b>${v}</b></span>`;
+    const tailChips = (a.tails || []).filter(t => t.P_gt > 2 && t.P_gt < 98)
+        .map(t => chip(`P(&gt;$${(t.K / 1000)}k)`, t.P_gt + '%')).slice(0, 5).join('');
+    const poly = (a.polymarket || []);
+    const polyRow = poly.length
+        ? poly.slice(0, 3).map(m => `<span class="prob-poly">${m.q}${m.yes != null ? ' · ' + m.yes + '%' : ''}</span>`).join('')
+        : '<span class="prob-muted">暂无足够预测市场</span>';
+    el.innerHTML = `
+      <div class="decision-card-title">📊 BTC 概率分布 · 风险中性
+        <span class="decision-freq" style="font-weight:400;">Deribit 期权 · 到期 ${a.expiry || '—'} (${a.days ?? '—'}天)</span></div>
+      <div class="prob-stats">
+        <div><div class="prob-lbl">预期区间 (±1σ)</div><div class="prob-val">$${(a.p16 / 1000).toFixed(1)}k–$${(a.p84 / 1000).toFixed(1)}k</div></div>
+        <div><div class="prob-lbl">中位</div><div class="prob-val">$${(a.median / 1000).toFixed(1)}k</div></div>
+        <div><div class="prob-lbl">上涨概率</div><div class="prob-val">${a.p_up}%</div></div>
+        <div><div class="prob-lbl">预期振幅</div><div class="prob-val">±${a.expected_move_pct}%</div></div>
+      </div>
+      <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="prob-svg" role="img" aria-label="BTC 到期价格风险中性概率密度">
+        ${band}
+        <path d="${area}" fill="${acc}" opacity="0.18"/>
+        <path d="${line}" fill="none" stroke="${acc}" stroke-width="2" stroke-linejoin="round"/>
+        <line x1="${spotX.toFixed(1)}" y1="${padT}" x2="${spotX.toFixed(1)}" y2="${H - padB}" stroke="var(--text-secondary)" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>
+        <text x="${(spotX + 4).toFixed(1)}" y="${padT + 10}" font-size="11" fill="var(--text-secondary)">现价 $${(a.spot / 1000).toFixed(1)}k</text>
+        ${ticks.join('')}
+      </svg>
+      <div class="prob-chips">${tailChips}</div>
+      <div class="prob-chips" style="margin-top:6px;"><span class="prob-lbl" style="align-self:center;">预测市场:</span>${polyRow}</div>
+      <div class="prob-foot">风险中性概率 · <b>非真实世界预测</b>（期权定价含风险溢价，下行概率偏高）· Breeden-Litzenberger 于 Deribit 期权链 · 仅展示</div>`;
 }
 
 /* ============================================================
