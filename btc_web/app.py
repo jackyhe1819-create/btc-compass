@@ -128,26 +128,15 @@ _builders_refreshing = False
 _builders_lock = threading.Lock()
 _BUILDERS_TTL = 3600              # 1 小时（与摘要刷新对齐）
 
-# ── 衍生品面板缓存（stale-while-revalidate，10 分钟 TTL）────────────
-_derivatives_cache = None
-_derivatives_cache_timestamp = None
-_derivatives_refreshing = False
-_derivatives_lock = threading.Lock()
-_DERIVATIVES_TTL = 600            # 10 分钟
+# ── 衍生品/期权/概率分布面板: PanelCache 收敛(SWR + partial 守卫 + 磁盘持久化) ──
+from panel_cache import PanelCache
 
-# ── 期权面板缓存（stale-while-revalidate，10 分钟 TTL）──────────────
-_options_cache = None
-_options_cache_timestamp = None
-_options_refreshing = False
-_options_lock = threading.Lock()
-_OPTIONS_TTL = 600                # 10 分钟
-
-# ── 概率分布面板缓存（stale-while-revalidate，10 分钟 TTL）──────────
-_probdist_cache = None
-_probdist_cache_timestamp = None
-_probdist_refreshing = False
-_probdist_lock = threading.Lock()
-_PROBDIST_TTL = 600                # 10 分钟
+DERIVATIVES_PANEL = PanelCache("derivatives", fetch_derivatives_panel, ttl=600, label="衍生品面板",
+                               save_fn=_save_cache_to_disk, load_fn=_load_cache_from_disk)
+OPTIONS_PANEL = PanelCache("options", fetch_options_panel, ttl=600, label="期权面板",
+                           save_fn=_save_cache_to_disk, load_fn=_load_cache_from_disk)
+PROBDIST_PANEL = PanelCache("probdist", fetch_probdist_panel, ttl=600, label="概率分布面板",
+                            save_fn=_save_cache_to_disk, load_fn=_load_cache_from_disk)
 
 
 def _do_refresh_dashboard():
@@ -328,112 +317,6 @@ def trigger_builders_refresh():
     t.start()
 
 
-def _do_refresh_derivatives():
-    """在后台线程中刷新衍生品面板缓存。"""
-    global _derivatives_cache, _derivatives_cache_timestamp, _derivatives_refreshing
-    try:
-        data = fetch_derivatives_panel()
-        _derivatives_cache = data
-        _derivatives_cache_timestamp = datetime.now()
-        _save_cache_to_disk("derivatives", _derivatives_cache, _derivatives_cache_timestamp)
-        print(f"✅ 衍生品面板缓存刷新完成 {_derivatives_cache_timestamp.strftime('%H:%M:%S')}")
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"⚠️ 衍生品面板缓存刷新失败: {e}")
-    finally:
-        _derivatives_refreshing = False
-
-
-def trigger_derivatives_refresh():
-    """触发后台刷新衍生品面板（若未在刷新中）。"""
-    global _derivatives_refreshing
-    with _derivatives_lock:
-        if _derivatives_refreshing:
-            return
-        _derivatives_refreshing = True
-    t = threading.Thread(target=_do_refresh_derivatives, daemon=True)
-    t.start()
-
-
-def _do_refresh_options():
-    """在后台线程中刷新期权面板缓存。"""
-    global _options_cache, _options_cache_timestamp, _options_refreshing
-    try:
-        data = fetch_options_panel()
-        if data.get("partial"):
-            if _options_cache and not _options_cache.get("partial"):
-                # 保留旧完整缓存, 回拨时间戳 → 约 2 分钟后自动重试(照 builders 先例)
-                _options_cache_timestamp = datetime.now() - timedelta(seconds=_OPTIONS_TTL - 120)
-                print("⚠️ 期权面板刷新为 partial, 保留旧完整缓存, 2 分钟后重试")
-                return
-            _options_cache = data
-            _options_cache_timestamp = datetime.now() - timedelta(seconds=_OPTIONS_TTL - 120)
-            _save_cache_to_disk("options", _options_cache, _options_cache_timestamp)
-            print("⚠️ 期权面板为 partial(无旧缓存), 2 分钟后重试")
-            return
-        _options_cache = data
-        _options_cache_timestamp = datetime.now()
-        _save_cache_to_disk("options", _options_cache, _options_cache_timestamp)
-        print(f"✅ 期权面板缓存刷新完成 {_options_cache_timestamp.strftime('%H:%M:%S')}")
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"⚠️ 期权面板缓存刷新失败: {e}")
-    finally:
-        _options_refreshing = False
-
-
-def trigger_options_refresh():
-    """触发后台刷新期权面板（若未在刷新中）。"""
-    global _options_refreshing
-    with _options_lock:
-        if _options_refreshing:
-            return
-        _options_refreshing = True
-    t = threading.Thread(target=_do_refresh_options, daemon=True)
-    t.start()
-
-
-def _do_refresh_probdist():
-    """在后台线程中刷新概率分布面板缓存。"""
-    global _probdist_cache, _probdist_cache_timestamp, _probdist_refreshing
-    try:
-        data = fetch_probdist_panel()
-        if data.get("partial"):
-            if _probdist_cache and not _probdist_cache.get("partial"):
-                # 保留旧完整缓存, 回拨时间戳 → 约 2 分钟后自动重试(照 builders 先例)
-                _probdist_cache_timestamp = datetime.now() - timedelta(seconds=_PROBDIST_TTL - 120)
-                print("⚠️ 概率分布面板刷新为 partial, 保留旧完整缓存, 2 分钟后重试")
-                return
-            _probdist_cache = data
-            _probdist_cache_timestamp = datetime.now() - timedelta(seconds=_PROBDIST_TTL - 120)
-            _save_cache_to_disk("probdist", _probdist_cache, _probdist_cache_timestamp)
-            print("⚠️ 概率分布面板为 partial(无旧缓存), 2 分钟后重试")
-            return
-        _probdist_cache = data
-        _probdist_cache_timestamp = datetime.now()
-        _save_cache_to_disk("probdist", _probdist_cache, _probdist_cache_timestamp)
-        print(f"✅ 概率分布面板缓存刷新完成 {_probdist_cache_timestamp.strftime('%H:%M:%S')}")
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"⚠️ 概率分布面板缓存刷新失败: {e}")
-    finally:
-        _probdist_refreshing = False
-
-
-def trigger_probdist_refresh():
-    """触发后台刷新概率分布面板（若未在刷新中）。"""
-    global _probdist_refreshing
-    with _probdist_lock:
-        if _probdist_refreshing:
-            return
-        _probdist_refreshing = True
-    t = threading.Thread(target=_do_refresh_probdist, daemon=True)
-    t.start()
-
-
 def get_cached_btc_data():
     """获取缓存的 BTC 数据"""
     global _btc_data_cache, _btc_data_timestamp
@@ -472,26 +355,7 @@ def _bootstrap_disk_cache():
         _builders_cache_timestamp = b_ts
         print(f"📦 从磁盘恢复开发者动态缓存（{b_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
 
-    global _derivatives_cache, _derivatives_cache_timestamp
-    dv_data, dv_ts = _load_cache_from_disk("derivatives")
-    if dv_data is not None:
-        _derivatives_cache = dv_data
-        _derivatives_cache_timestamp = dv_ts
-        print(f"📦 从磁盘恢复衍生品面板缓存（{dv_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
-
-    global _options_cache, _options_cache_timestamp
-    o_data, o_ts = _load_cache_from_disk("options")
-    if o_data is not None:
-        _options_cache = o_data
-        _options_cache_timestamp = o_ts
-        print(f"📦 从磁盘恢复期权面板缓存（{o_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
-
-    global _probdist_cache, _probdist_cache_timestamp
-    p_data, p_ts = _load_cache_from_disk("probdist")
-    if p_data is not None:
-        _probdist_cache = p_data
-        _probdist_cache_timestamp = p_ts
-        print(f"📦 从磁盘恢复概率分布面板缓存（{p_ts.strftime('%Y-%m-%d %H:%M:%S')}）")
+    # derivatives/options/probdist 由 PanelCache 构造时自行回灌(load_fn), 不在此处
 
 _bootstrap_disk_cache()
 
@@ -503,11 +367,11 @@ def _delayed_warmup():
     trigger_dashboard_refresh()
     trigger_news_refresh()
     _t.sleep(10)
-    trigger_derivatives_refresh()
+    DERIVATIVES_PANEL.trigger_refresh()
     _t.sleep(5)
-    trigger_options_refresh()
+    OPTIONS_PANEL.trigger_refresh()
     _t.sleep(5)
-    trigger_probdist_refresh()
+    PROBDIST_PANEL.trigger_refresh()
     _t.sleep(5)
     trigger_builders_refresh()
 
@@ -706,109 +570,36 @@ def api_market_patterns():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/derivatives')
-def api_derivatives():
-    """
-    API 端点：返回衍生品杠杆面板数据（OI / 资金费率 / 多空比 / 行情性质）
-    策略：stale-while-revalidate，同 /api/dashboard
-    """
-    global _derivatives_cache, _derivatives_cache_timestamp
-
-    now = datetime.now()
-    cache_age = int((now - _derivatives_cache_timestamp).total_seconds()) if _derivatives_cache_timestamp else None
-    has_cache = _derivatives_cache is not None
-
-    if has_cache:
-        if cache_age is not None and cache_age >= _DERIVATIVES_TTL:
-            trigger_derivatives_refresh()
-        resp = jsonify({
-            "success": True,
-            "cached": True,
-            "cache_age_s": cache_age,
-            **_derivatives_cache
-        })
-        fresh_left = max(0, _DERIVATIVES_TTL - (cache_age or 0))
-        return _swr_headers(resp, fresh_left, _DERIVATIVES_TTL)
-
-    # 无缓存（冷启动）：立即返回 computing 状态，前端负责轮询
-    trigger_derivatives_refresh()
-    resp = jsonify({
-        "success": False,
-        "computing": True,
-        "error": "衍生品数据加载中，请稍候…"
-    })
+def _serve_panel(panel, computing_msg: str):
+    """SWR 面板路由通用体: 有缓存 → 200(过期顺带触发刷新); 无缓存 → 202 computing。"""
+    cache_age = panel.age_s()
+    if panel.cache is not None:
+        if cache_age is not None and cache_age >= panel.ttl:
+            panel.trigger_refresh()
+        resp = jsonify({"success": True, "cached": True, "cache_age_s": cache_age, **panel.cache})
+        return _swr_headers(resp, max(0, panel.ttl - (cache_age or 0)), panel.ttl)
+    panel.trigger_refresh()
+    resp = jsonify({"success": False, "computing": True, "error": computing_msg})
     resp.headers['Cache-Control'] = 'no-store'
     return resp, 202
+
+
+@app.route('/api/derivatives')
+def api_derivatives():
+    """API 端点:衍生品杠杆面板(OI/资金费率/多空比/行情性质)。SWR, 同 /api/dashboard。"""
+    return _serve_panel(DERIVATIVES_PANEL, "衍生品数据加载中，请稍候…")
 
 
 @app.route('/api/options')
 def api_options():
-    """
-    API 端点：返回 BTC 期权面板（DVOL/偏斜/看跌看涨比/期限结构/最大痛点）
-    策略：stale-while-revalidate，同 /api/derivatives
-    """
-    global _options_cache, _options_cache_timestamp
-
-    now = datetime.now()
-    cache_age = int((now - _options_cache_timestamp).total_seconds()) if _options_cache_timestamp else None
-    has_cache = _options_cache is not None
-
-    if has_cache:
-        if cache_age is not None and cache_age >= _OPTIONS_TTL:
-            trigger_options_refresh()
-        resp = jsonify({
-            "success": True,
-            "cached": True,
-            "cache_age_s": cache_age,
-            **_options_cache
-        })
-        fresh_left = max(0, _OPTIONS_TTL - (cache_age or 0))
-        return _swr_headers(resp, fresh_left, _OPTIONS_TTL)
-
-    # 无缓存（冷启动）：立即返回 computing 状态，前端负责轮询
-    trigger_options_refresh()
-    resp = jsonify({
-        "success": False,
-        "computing": True,
-        "error": "期权数据加载中，请稍候…"
-    })
-    resp.headers['Cache-Control'] = 'no-store'
-    return resp, 202
+    """API 端点:BTC 期权面板(DVOL/偏斜/看跌看涨比/期限结构/最大痛点)。SWR。"""
+    return _serve_panel(OPTIONS_PANEL, "期权数据加载中，请稍候…")
 
 
 @app.route('/api/probdist')
 def api_probdist():
-    """
-    API 端点：返回 BTC 价格概率分布面板（风险中性密度/Polymarket 隐含概率）
-    策略：stale-while-revalidate，同 /api/options
-    """
-    global _probdist_cache, _probdist_cache_timestamp
-
-    now = datetime.now()
-    cache_age = int((now - _probdist_cache_timestamp).total_seconds()) if _probdist_cache_timestamp else None
-    has_cache = _probdist_cache is not None
-
-    if has_cache:
-        if cache_age is not None and cache_age >= _PROBDIST_TTL:
-            trigger_probdist_refresh()
-        resp = jsonify({
-            "success": True,
-            "cached": True,
-            "cache_age_s": cache_age,
-            **_probdist_cache
-        })
-        fresh_left = max(0, _PROBDIST_TTL - (cache_age or 0))
-        return _swr_headers(resp, fresh_left, _PROBDIST_TTL)
-
-    # 无缓存（冷启动）：立即返回 computing 状态，前端负责轮询
-    trigger_probdist_refresh()
-    resp = jsonify({
-        "success": False,
-        "computing": True,
-        "error": "概率分布数据加载中，请稍候…"
-    })
-    resp.headers['Cache-Control'] = 'no-store'
-    return resp, 202
+    """API 端点:BTC 价格概率分布面板(风险中性密度/Polymarket)。SWR。"""
+    return _serve_panel(PROBDIST_PANEL, "概率分布数据加载中，请稍候…")
 
 
 @app.route('/api/news')
