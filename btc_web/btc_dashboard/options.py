@@ -1,6 +1,7 @@
 """Deribit BTC 期权数据: DVOL + 期权链快照派生指标。纯函数: 合约名解析 + 期权链快照派生指标计算。"""
 import datetime
 import json
+import os
 import time
 import urllib.parse
 import urllib.request
@@ -103,6 +104,22 @@ _BASE = "https://www.deribit.com/api/v2/public/"
 _panel_cache = {"data": None, "ts": 0.0}
 _PANEL_TTL = 600
 
+_DVOL_STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "dvol_history.json")
+_DVOL_START_MS = 1616544000000  # 2021-03-24 DVOL inception (与 backfill._DVOL_START_MS 同值)
+
+
+def _load_dvol_store(path: str = None) -> List[Tuple[int, float]]:
+    """读 backfill 维护的持久 DVOL 日线库(只读; 写入权归 backfill.backfill_dvol)。
+    缺失/损坏/版本不符 → [] , 调用方回退全量拉取。"""
+    try:
+        with open(path or _DVOL_STORE) as f:
+            doc = json.load(f)
+        if doc.get("version") != "v1":
+            return []
+        return sorted((int(ts), float(v)) for ts, v in doc.get("series", []))
+    except Exception:
+        return []
+
 
 def _now() -> datetime.datetime:
     return datetime.datetime.now(UTC)
@@ -153,14 +170,21 @@ def _fetch_chain():
 def _assemble_panel() -> Dict:
     now = _now()
     partial = False
-    start = 1609459200000  # 2021-01-01
     end = int(now.timestamp() * 1000)
+    store = _load_dvol_store()
+    # 持久库在 → 只拉尾部增量(通常 0-2 点); 库缺失/损坏 → 全量回退(Render 冷启动即此路径)
+    start = (store[-1][0] + 86400000) if store else _DVOL_START_MS
     try:
-        hist = fetch_dvol_history(start, end)
+        tail = fetch_dvol_history(start, end) if end > start else []
     except Exception:
-        hist = []
+        tail = []
+    pts = dict(store)
+    pts.update(tail)
+    hist = sorted(pts.items())
     if not hist:
-        partial = True   # 合法空响应与抓取失败同等对待: DVOL 侧缺失即 partial
+        partial = True   # 库与网络双空: DVOL 侧缺失即 partial
+    elif (end - hist[-1][0]) > 3 * 86400000:
+        partial = True   # 增量拉不到且库明显过期(>3天): 别把旧值当今天的 IV
     closes = [v for _, v in hist]
     dvol_now = closes[-1] if closes else None
     dvol_pct, n = (calc_dvol_percentile(closes, dvol_now) if dvol_now else (None, 0))

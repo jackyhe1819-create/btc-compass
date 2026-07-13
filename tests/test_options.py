@@ -74,11 +74,18 @@ def test_dvol_percentile_respects_window():
     assert pct == 99.9   # 尾部 541..2000 中 1458 个 <1999 (若误取头部会得 100.0)
 
 
+def _ms(dt):
+    return int(dt.timestamp() * 1000)
+
+
 def test_assemble_panel_from_raw(monkeypatch):
     now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    # 时间戳须贴近 now: 尾部落后 >3 天会被过期检查如实标 partial
+    d1, d2, d3 = (_ms(now) - 2 * 86400000, _ms(now) - 1 * 86400000, _ms(now))
+    monkeypatch.setattr(opt, "_load_dvol_store", lambda: [])   # 隔离真实持久库
     monkeypatch.setattr(opt, "_now", lambda: now)
     monkeypatch.setattr(opt, "fetch_dvol_history",
-                        lambda a, b: [(1, 40.0), (2, 38.0), (3, 36.0)])
+                        lambda a, b: [(d1, 40.0), (d2, 38.0), (d3, 36.0)])
     monkeypatch.setattr(opt, "_fetch_chain",
                         lambda: (_chain(), 64000.0))
     p = opt._assemble_panel()
@@ -92,6 +99,7 @@ def test_assemble_panel_partial_on_chain_failure(monkeypatch):
     # 期权链拉取失败时，输出字典必须仍含全部快照键 (值为 None)，
     # 而不是整体缺失这些键 —— 下游 (Flask 路由/前端) 依赖"键存在、值为 None"的降级契约。
     now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    monkeypatch.setattr(opt, "_load_dvol_store", lambda: [])   # 隔离真实持久库
     monkeypatch.setattr(opt, "_now", lambda: now)
     monkeypatch.setattr(opt, "fetch_dvol_history",
                         lambda a, b: [(1, 40.0), (2, 38.0), (3, 36.0)])
@@ -128,6 +136,7 @@ def test_assemble_panel_partial_on_empty_dvol(monkeypatch):
     # DVOL 接口返回合法空 data(非异常)时也必须标 partial —
     # 否则 dvol 全 None 的空壳会被当"完整"数据写入三层缓存(SWR 守卫依赖 partial 语义)
     now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    monkeypatch.setattr(opt, "_load_dvol_store", lambda: [])   # 隔离真实持久库
     monkeypatch.setattr(opt, "_now", lambda: now)
     monkeypatch.setattr(opt, "fetch_dvol_history", lambda a, b: [])
     monkeypatch.setattr(opt, "_fetch_chain", lambda: (_chain(), 64000.0))
@@ -135,6 +144,68 @@ def test_assemble_panel_partial_on_empty_dvol(monkeypatch):
     assert p["partial"] is True
     assert p["dvol_now"] is None
     assert p["put_call_oi"] == 3.19   # 链侧不受 DVOL 空数据影响, 仍正常计算
+
+
+def test_load_dvol_store_missing_or_corrupt(tmp_path):
+    # 缺失 / 坏 JSON / 版本不符 → 一律 [] (调用方回退全量拉取)
+    assert opt._load_dvol_store(str(tmp_path / "nope.json")) == []
+    bad = tmp_path / "bad.json"; bad.write_text("{not json")
+    assert opt._load_dvol_store(str(bad)) == []
+    v2 = tmp_path / "v2.json"; v2.write_text('{"version":"v2","series":[[1000,40.0]]}')
+    assert opt._load_dvol_store(str(v2)) == []
+
+
+def test_load_dvol_store_reads_series(tmp_path):
+    p = tmp_path / "ok.json"
+    p.write_text('{"version":"v1","series":[[2000,38.0],[1000,40.0]]}')
+    assert opt._load_dvol_store(str(p)) == [(1000, 40.0), (2000, 38.0)]  # 排序兜底
+
+
+def test_assemble_panel_fetches_tail_only_when_store_present(monkeypatch):
+    # store 在 → 只拉 store 末点+1天 → now 的增量, 不再全量重拉 5.3 年
+    now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    d1, d2, d3 = (_ms(now) - 3 * 86400000, _ms(now) - 2 * 86400000, _ms(now) - 1 * 86400000)
+    monkeypatch.setattr(opt, "_now", lambda: now)
+    monkeypatch.setattr(opt, "_load_dvol_store", lambda: [(d1, 40.0), (d2, 38.0)])
+    calls = []
+    def fake_fetch(start, end):
+        calls.append((start, end))
+        return [(d3, 36.0)]
+    monkeypatch.setattr(opt, "fetch_dvol_history", fake_fetch)
+    monkeypatch.setattr(opt, "_fetch_chain", lambda: (_chain(), 64000.0))
+    p = opt._assemble_panel()
+    assert calls and calls[0][0] == d2 + 86400000   # 增量起点 = 库末点 + 1 天
+    assert p["dvol_now"] == 36.0                    # 合并后末点
+    assert p["partial"] is False
+
+
+def test_assemble_panel_fresh_store_survives_tail_failure(monkeypatch):
+    # 库新鲜(末点=昨天)时 Deribit 抖动不该把面板打成 partial — 库本身就是完整数据
+    now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    d_y = _ms(now) - 1 * 86400000
+    monkeypatch.setattr(opt, "_now", lambda: now)
+    monkeypatch.setattr(opt, "_load_dvol_store", lambda: [(d_y - 86400000, 40.0), (d_y, 38.0)])
+    def boom(a, b):
+        raise RuntimeError("deribit down")
+    monkeypatch.setattr(opt, "fetch_dvol_history", boom)
+    monkeypatch.setattr(opt, "_fetch_chain", lambda: (_chain(), 64000.0))
+    p = opt._assemble_panel()
+    assert p["partial"] is False
+    assert p["dvol_now"] == 38.0
+
+
+def test_assemble_panel_partial_when_store_stale_and_tail_fails(monkeypatch):
+    # 库过期(>3 天)且增量拉不到 → 别把旧值当今天的 IV, 标 partial
+    now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    d_old = _ms(now) - 5 * 86400000
+    monkeypatch.setattr(opt, "_now", lambda: now)
+    monkeypatch.setattr(opt, "_load_dvol_store", lambda: [(d_old - 86400000, 40.0), (d_old, 38.0)])
+    def boom(a, b):
+        raise RuntimeError("deribit down")
+    monkeypatch.setattr(opt, "fetch_dvol_history", boom)
+    monkeypatch.setattr(opt, "_fetch_chain", lambda: (_chain(), 64000.0))
+    p = opt._assemble_panel()
+    assert p["partial"] is True
 
 
 def test_backfill_dvol_idempotent(tmp_path, monkeypatch):
