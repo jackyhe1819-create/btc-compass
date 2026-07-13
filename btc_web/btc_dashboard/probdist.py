@@ -153,3 +153,45 @@ def fetch_polymarket_btc() -> List[dict]:
     except Exception:
         out = []
     return out
+
+
+from .options import _fetch_chain
+
+_RND_KEYS = ["expiry", "days", "spot", "forward", "pdf", "median", "mode", "mean",
+             "p16", "p84", "expected_move_pct", "p_up", "tails"]
+_panel_cache = {"data": None, "ts": 0.0}
+_PANEL_TTL = 600
+
+
+def _now() -> datetime.datetime:
+    return datetime.datetime.now(UTC)
+
+
+def _fetch_chain_cached():
+    return _fetch_chain()          # 复用 options 的链抓取(自带缓存)
+
+
+def _assemble_probdist() -> dict:
+    now = _now()
+    partial = False
+    rnd = None
+    try:
+        chain, spot = _fetch_chain_cached()
+        rnd = risk_neutral_density(chain, spot, now)
+    except Exception:
+        rnd = None
+    if rnd is None:
+        partial = True
+        rnd = {k: None for k in _RND_KEYS}
+    poly = fetch_polymarket_btc()
+    return {**rnd, "polymarket": poly, "updated_at": now.strftime("%H:%M"), "partial": partial}
+
+
+def fetch_probdist_panel() -> dict:
+    now = time.time()
+    if _panel_cache["data"] is not None and now - _panel_cache["ts"] < _PANEL_TTL:
+        return _panel_cache["data"]
+    data = _assemble_probdist()
+    if not data.get("partial"):
+        _panel_cache.update(data=data, ts=now)
+    return data

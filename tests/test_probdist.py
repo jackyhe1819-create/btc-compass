@@ -96,3 +96,20 @@ def test_polymarket_eth_filter_not_over_broad(monkeypatch):
     qs = [m["q"] for m in pd_.fetch_polymarket_btc()]
     assert any("whether" in q for q in qs)        # 含 whether(内含 eth 子串)的真 BTC 市场不被误删
     assert not any("Ethereum" in q for q in qs)   # ETH 市场仍排除
+
+def test_assemble_panel(monkeypatch):
+    now = datetime.datetime(2026, 7, 13, tzinfo=UTC)
+    monkeypatch.setattr(pd_, "_now", lambda: now)
+    monkeypatch.setattr(pd_, "_fetch_chain_cached", lambda: (_synth_chain(), 60000.0))
+    monkeypatch.setattr(pd_, "fetch_polymarket_btc", lambda: [{"q":"x","yes":18.0,"end":"2026-12-31"}])
+    p = pd_._assemble_probdist()
+    assert p["partial"] is False and p["median"] is not None and len(p["polymarket"]) == 1
+
+def test_assemble_panel_rnd_fail_partial(monkeypatch):
+    now = datetime.datetime(2026, 7, 13, tzinfo=UTC)
+    monkeypatch.setattr(pd_, "_now", lambda: now)
+    def boom(): raise RuntimeError("deribit down")
+    monkeypatch.setattr(pd_, "_fetch_chain_cached", boom)
+    monkeypatch.setattr(pd_, "fetch_polymarket_btc", lambda: [])
+    p = pd_._assemble_probdist()
+    assert p["partial"] is True and "median" in p and p["median"] is None

@@ -53,6 +53,9 @@ from .calendars import fetch_crypto_calendar, fetch_macro_calendar
 # 期权（Deribit DVOL + 期权链快照）
 from .options import fetch_options_panel, fetch_dvol_history, calc_dvol_percentile
 
+# 概率分布（Breeden-Litzenberger RND + Polymarket 叠加）
+from .probdist import fetch_probdist_panel
+
 # 历史时序
 from .history import get_indicator_history
 
@@ -94,6 +97,8 @@ __all__ = [
     "fetch_crypto_calendar", "fetch_macro_calendar",
     # 期权
     "fetch_options_panel", "fetch_dvol_history", "calc_dvol_percentile",
+    # 概率分布
+    "fetch_probdist_panel",
     # 历史
     "get_indicator_history",
     # 汇总
