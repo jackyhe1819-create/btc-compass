@@ -53,6 +53,29 @@ from .options import parse_instrument
 _GRID_N = 400
 
 
+def _forward_from_parity(chain: List[dict], spot: float,
+                         exp: datetime.datetime) -> float:
+    """看涨看跌平价反解远期价: F = K_atm + (C - P)_usd, 用现有链无需额外 API。
+    Deribit 期权 mark_price 以 BTC 计价, ×underlying 转 USD。ATM 无双边则退 spot。
+    (远期≠现价: 近月常轻贴水, 远月升水; F=spot 会系统性偏移尾概率, 见对抗性复审)。"""
+    prices = {}   # (K, cp) -> mark_usd
+    for x in chain:
+        try:
+            e, K, cp = parse_instrument(x["instrument_name"])
+        except Exception:
+            continue
+        if e != exp:
+            continue
+        mk = x.get("mark_price"); up = x.get("underlying_price")
+        if mk is not None and up:
+            prices[(K, cp)] = mk * up
+    both = sorted({K for (K, cp) in prices if (K, "C") in prices and (K, "P") in prices})
+    if not both:
+        return float(spot)
+    katm = min(both, key=lambda k: abs(k - spot))
+    return katm + (prices[(katm, "C")] - prices[(katm, "P")])
+
+
 def risk_neutral_density(chain: List[dict], spot: float,
                          now: datetime.datetime) -> Optional[dict]:
     if not spot or spot <= 0:
@@ -76,7 +99,7 @@ def risk_neutral_density(chain: List[dict], spot: float,
             iv_by_K.setdefault(K, iv)
     if len(iv_by_K) < 5:
         return None
-    F = float(spot)
+    F = _forward_from_parity(chain, spot, exp)
     T = (exp - now).total_seconds() / (365.25 * 86400)
     Ks = sorted(iv_by_K)
     try:

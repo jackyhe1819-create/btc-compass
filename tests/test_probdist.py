@@ -113,3 +113,22 @@ def test_assemble_panel_rnd_fail_partial(monkeypatch):
     monkeypatch.setattr(pd_, "fetch_polymarket_btc", lambda: [])
     p = pd_._assemble_probdist()
     assert p["partial"] is True and "median" in p and p["median"] is None
+
+
+def test_forward_from_parity():
+    exp = datetime.datetime(2026, 7, 31, tzinfo=UTC)
+    # ATM K=60000: C mark 0.05 BTC, P mark 0.03 BTC, underlying 60000
+    #  C_usd=3000, P_usd=1800 → F = 60000 + (3000-1800) = 61200
+    chain = [
+        {"instrument_name": "BTC-31JUL26-60000-C", "mark_price": 0.05, "underlying_price": 60000},
+        {"instrument_name": "BTC-31JUL26-60000-P", "mark_price": 0.03, "underlying_price": 60000},
+        {"instrument_name": "BTC-31JUL26-55000-C", "mark_price": 0.09, "underlying_price": 60000},  # 只有C, 无P → 不选
+    ]
+    assert pd_._forward_from_parity(chain, 60000, exp) == 61200
+
+
+def test_forward_from_parity_fallback_spot():
+    exp = datetime.datetime(2026, 7, 31, tzinfo=UTC)
+    # 无 ATM 双边(只有 C) → 退回 spot
+    chain = [{"instrument_name": "BTC-31JUL26-60000-C", "mark_price": 0.05, "underlying_price": 60000}]
+    assert pd_._forward_from_parity(chain, 63000, exp) == 63000.0
