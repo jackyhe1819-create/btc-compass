@@ -184,7 +184,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(renderOptions, 2700);
     setInterval(renderOptions, 10 * 60 * 1000); // 期权面板缓存 TTL 10 分钟，同步刷新
     setTimeout(renderProbDist, 3000);
-    setInterval(renderProbDist, 600000); // 概率分布面板缓存 TTL 10 分钟，同步刷新
+    setInterval(renderProbDist, 10 * 60 * 1000); // 概率分布面板缓存 TTL 10 分钟，同步刷新
     setTimeout(fetchCycleEvents, 3000);
     setInterval(fetchCycleEvents, 60 * 60 * 1000); // 周期相位慢变，每小时刷新
     setTimeout(fetchRoadmap, 3300);
@@ -2605,6 +2605,13 @@ async function renderOptions() {
    BTC 概率分布（期权隐含风险中性密度）
    ============================================================ */
 
+// HTML 转义：外部字符串（如 Polymarket 市场标题）拼进 innerHTML 前必须过一遍，防 XSS
+function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+}
+
 async function renderProbDist() {
     const el = document.getElementById('probDistCard');
     if (!el) return;
@@ -2632,7 +2639,7 @@ async function renderProbDist() {
         .map(t => chip(`P(&gt;$${(t.K / 1000)}k)`, t.P_gt + '%')).slice(0, 5).join('');
     const poly = (a.polymarket || []);
     const polyRow = poly.length
-        ? poly.slice(0, 3).map(m => `<span class="prob-poly">${m.q}${m.yes != null ? ' · ' + m.yes + '%' : ''}</span>`).join('')
+        ? poly.slice(0, 3).map(m => `<span class="prob-poly">${escapeHtml(m.q)}${m.yes != null ? ' · ' + m.yes + '%' : ''}</span>`).join('')
         : '<span class="prob-muted">暂无足够预测市场</span>';
     el.innerHTML = `
       <div class="decision-card-title">📊 BTC 概率分布 · 风险中性
