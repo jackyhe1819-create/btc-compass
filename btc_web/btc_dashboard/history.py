@@ -17,7 +17,6 @@ from .core import (
     POWER_LAW_INTERCEPT, POWER_LAW_SLOPE,
     AHR999_A, AHR999_B,
 )
-from .indicators_aux import fetch_company_holdings_data
 
 
 def get_ahr999_history(df: pd.DataFrame, days: int = 90) -> dict:
@@ -643,62 +642,18 @@ def get_lth_cdd_history(days: int = 30) -> dict:
         return {"indicator": "长期持有者(CDD)", "dates": [], "values": [], "thresholds": {}}
 
 
-def get_company_holdings_history(df: pd.DataFrame, days: int = 30) -> dict:
-    """
-    公司持仓历史：当日持仓量 × 历史 BTC 价格，
-    展示机构持仓总价值（十亿美元）的走势
-    """
-    try:
-        holdings, _ = fetch_company_holdings_data()
-        if not holdings or holdings <= 0:
-            return {"indicator": "公司持仓", "dates": [], "values": [], "thresholds": {}}
-
-        btc_series = df.iloc[:, 0].tail(days)
-        dates  = [d.strftime("%Y-%m-%d") for d in btc_series.index]
-        values = [round(holdings * float(p) / 1e9, 2) for p in btc_series.values]
-
-        return {
-            "indicator": "公司持仓",
-            "dates":  dates,
-            "values": values,
-            "unit":   "B USD",
-            "label":  f"持仓价值（{holdings:,.0f} BTC × BTC价格）",
-            "thresholds": {}
-        }
-    except Exception as e:
-        print(f"⚠️ get_company_holdings_history 失败: {e}")
-        return {"indicator": "公司持仓", "dates": [], "values": [], "thresholds": {}}
+def get_company_holdings_history(df: pd.DataFrame = None, days: int = 30) -> dict:
+    """公司持仓历史 — 已下线(诚实性): 旧实现是「当日持仓量 × 历史价格」的伪历史,
+    曲线只是价格走势的缩放, 且前端渲染会丢弃说明标签。
+    在攒出真实逐日持仓快照前返回空(sparkline 落平线兜底, drawer 显示空)。"""
+    return {"indicator": "公司持仓", "dates": [], "values": [], "thresholds": {}}
 
 
-def get_max_pain_history(df: pd.DataFrame, days: int = 30) -> dict:
-    """
-    最大痛点历史：用当日痛点价格 + 历史 BTC 收盘价，
-    计算 BTC/痛点 比率走势（>1 表示 BTC 高于痛点，<1 表示低于痛点）
-    """
-    try:
-        # 获取当日最大痛点价格
-        result = calc_max_pain()
-        pain_price = result.value
-        if pain_price is None or (isinstance(pain_price, float) and np.isnan(pain_price)):
-            return {"indicator": "最大痛点", "dates": [], "values": [], "thresholds": {}}
-
-        btc_series = df.iloc[:, 0].tail(days)
-        dates  = [d.strftime("%Y-%m-%d") for d in btc_series.index]
-        values = [round(float(p) / pain_price, 3) for p in btc_series.values]
-
-        return {
-            "indicator": "最大痛点",
-            "dates":  dates,
-            "values": values,
-            "unit":   "ratio",
-            "label":  f"BTC / 痛点${pain_price:,.0f}",
-            "thresholds": {
-                "痛点":   {"value": 1.0,  "color": "#f79322", "label": f"痛点 ${pain_price:,.0f}"},
-            }
-        }
-    except Exception as e:
-        print(f"⚠️ get_max_pain_history 失败: {e}")
-        return {"indicator": "最大痛点", "dates": [], "values": [], "thresholds": {}}
+def get_max_pain_history(df: pd.DataFrame = None, days: int = 30) -> dict:
+    """最大痛点历史 — 已下线(诚实性): 旧实现是「今日痛点定值 × 历史现价」的伪历史,
+    形态与价格图完全同形, 会被读成痛点位的真实迁移(期权面板每 10min 已在算
+    真实 max_pain, 攒出逐日快照序列后再上真历史)。"""
+    return {"indicator": "最大痛点", "dates": [], "values": [], "thresholds": {}}
 
 
 def get_mnav_history(df: pd.DataFrame = None, days: int = 30) -> dict:

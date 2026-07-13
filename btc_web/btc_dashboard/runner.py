@@ -44,7 +44,7 @@ from .scoring import compute_dual_scores
 from .history import (
     get_fear_greed_history, get_funding_rate_history_okx,
     get_long_short_history, get_hashrate_history, get_mnav_history,
-    get_etf_history, get_max_pain_history, get_company_holdings_history,
+    get_etf_history, get_max_pain_history,
     get_lth_cdd_history,
     get_mvrv_z_history, get_sth_cost_history, get_nupl_history, get_puell_history,
 )
@@ -245,14 +245,8 @@ def get_sparklines(df: pd.DataFrame, indicators: dict, days: int = 7) -> dict:
                 sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
 
             elif name == "公司持仓":
-                # 直接用已计算的持仓量，避免重复调用 CoinGecko API
-                holdings_val = indicators[name].value
-                if holdings_val and not np.isnan(holdings_val) and holdings_val > 0:
-                    btc_s = recent['price']
-                    sparklines[name] = [round(float(holdings_val) * float(p) / 1e9, 2) for p in btc_s.values]
-                else:
-                    h = get_company_holdings_history(df, days=days)
-                    sparklines[name] = h.get("values", [])[-days:] or [indicators[name].score] * days
+                # 伪历史已下线(当日持仓 × 历史价只是价格曲线的缩放) — 平线兜底
+                sparklines[name] = [indicators[name].score] * days
 
             elif name == "长期持有者(CDD)":
                 h = get_lth_cdd_history(days=days)
