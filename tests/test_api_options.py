@@ -29,6 +29,7 @@ def test_api_options_served_from_cache(monkeypatch):
 def test_api_options_cold_start_returns_computing(monkeypatch):
     monkeypatch.setattr(appmod, "_options_cache", None)
     monkeypatch.setattr(appmod, "_options_cache_timestamp", None)
+    monkeypatch.setattr(appmod, "trigger_options_refresh", lambda: None)   # 避免真网络后台线程
 
     client = app.test_client()
     resp = client.get("/api/options")

@@ -489,7 +489,8 @@ def _delayed_warmup():
     _t.sleep(5)
     trigger_builders_refresh()
 
-threading.Thread(target=_delayed_warmup, daemon=True).start()
+if not os.environ.get("BTC_DISABLE_WARMUP"):
+    threading.Thread(target=_delayed_warmup, daemon=True).start()
 
 
 # ── 评分历史回填（幂等, 一次性; 失败每 30 分钟重试, 最多 8 次）────────
@@ -515,7 +516,8 @@ def _backfill_worker():
     except Exception as e:
         print(f"⚠️ DVOL 历史回填失败: {e}")
 
-threading.Thread(target=_backfill_worker, daemon=True).start()
+if not os.environ.get("BTC_DISABLE_WARMUP"):
+    threading.Thread(target=_backfill_worker, daemon=True).start()
 
 
 _last_error = None  # 记录最近一次后台错误
