@@ -104,7 +104,7 @@ def test_assemble_panel_partial_on_chain_failure(monkeypatch):
     assert result["partial"] is True
     assert result["dvol_now"] == 36.0   # DVOL 侧不受期权链失败影响，仍正常计算
 
-    for key in ("put_call_oi", "skew_25d", "skew_exp", "atm_front", "atm_back",
+    for key in ("put_call_oi", "skew_wing", "skew_exp", "atm_front", "atm_back",
                 "term_slope", "front_exp", "back_exp", "max_pain", "max_pain_exp",
                 "n_contracts"):
         assert key in result, f"missing snapshot key: {key}"

@@ -2593,7 +2593,7 @@ async function renderOptions() {
         <polyline points="${pts}" fill="none" stroke="var(--accent-btc,#f0864a)" stroke-width="1.5"
           stroke-linejoin="round" stroke-linecap="round"/></svg>` : ''}
       <div class="opt-grid">
-        ${tile('25Δ 偏斜', a.skew_25d == null ? '—' : (a.skew_25d > 0 ? '+' : '') + a.skew_25d, a.skew_25d == null ? '' : (a.skew_25d > 0 ? '看跌溢价·防御' : '看涨溢价'))}
+        ${tile('翼部偏斜(价外5-15%)', a.skew_wing == null ? '—' : (a.skew_wing > 0 ? '+' : '') + a.skew_wing, a.skew_wing == null ? '' : (a.skew_wing > 0 ? '看跌溢价·防御' : '看涨溢价'))}
         ${tile('Put/Call OI', a.put_call_oi == null ? '—' : a.put_call_oi, a.put_call_oi == null ? '' : (a.put_call_oi < 1 ? '看涨主导' : '看跌主导'))}
         ${tile('期限结构', a.term_slope == null ? '—' : (a.term_slope > 0 ? '+' : '') + a.term_slope, a.term_slope == null ? '' : (a.term_slope > 0 ? 'contango' : 'backwardation'))}
         ${tile('最大痛点', a.max_pain == null ? '—' : '$' + a.max_pain.toLocaleString(), a.max_pain_exp || '')}

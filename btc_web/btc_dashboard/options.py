@@ -77,7 +77,7 @@ def derive_snapshot(chain: List[dict], spot: float, now: datetime.datetime) -> D
     fmt = lambda e: e.strftime("%d%b%y") if e else None
     return {
         "put_call_oi": round(poi / coi, 2) if coi else None,
-        "skew_25d": round(put_wing - call_wing, 1) if (put_wing is not None and call_wing is not None) else None,
+        "skew_wing": round(put_wing - call_wing, 1) if (put_wing is not None and call_wing is not None) else None,
         "skew_exp": fmt(skew_exp),
         "atm_front": round(atm_front, 1) if atm_front is not None else None,
         "atm_back": round(atm_back, 1) if atm_back is not None else None,
