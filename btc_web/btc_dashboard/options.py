@@ -189,6 +189,14 @@ def _assemble_panel() -> Dict:
     dvol_now = closes[-1] if closes else None
     dvol_pct, n = (calc_dvol_percentile(closes, dvol_now) if dvol_now else (None, 0))
     spark = [round(v, 1) for _, v in hist[-90:]]
+    # 全史降采样 ~365 点(约 5 天/点), 末点必含 — 供前端「全部」跨度视图
+    step = max(1, len(hist) // 365)
+    full = hist[::step]
+    if hist and full[-1][0] != hist[-1][0]:
+        full.append(hist[-1])
+    spark_full = [round(v, 1) for _, v in full]
+    spark_full_start = (datetime.datetime.utcfromtimestamp(hist[0][0] / 1000).strftime("%Y-%m")
+                        if hist else None)
     try:
         chain, spot = _fetch_chain()
         snap = derive_snapshot(chain, spot, now)
@@ -199,6 +207,7 @@ def _assemble_panel() -> Dict:
     out = {"spot": round(spot) if spot else None,
            "dvol_now": round(dvol_now, 1) if dvol_now else None,
            "dvol_pct": dvol_pct, "dvol_window_days": n, "spark": spark,
+           "spark_full": spark_full, "spark_full_start": spark_full_start,
            "updated_at": now.strftime("%H:%M"), "partial": partial}
     out.update(snap)
     return out

@@ -208,6 +208,33 @@ def test_assemble_panel_partial_when_store_stale_and_tail_fails(monkeypatch):
     assert p["partial"] is True
 
 
+def test_assemble_panel_spark_full_downsampled(monkeypatch):
+    # 全史降采样: ~365-500 点, 末点(今天)必在, 起始年月正确; spark(90d) 不受影响
+    now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    base = _ms(now) - 1000 * 86400000
+    series = [(base + i * 86400000, 30.0 + (i % 50)) for i in range(1000)]
+    monkeypatch.setattr(opt, "_now", lambda: now)
+    monkeypatch.setattr(opt, "_load_dvol_store", lambda: series)
+    monkeypatch.setattr(opt, "fetch_dvol_history", lambda a, b: [])
+    monkeypatch.setattr(opt, "_fetch_chain", lambda: (_chain(), 64000.0))
+    p = opt._assemble_panel()
+    assert 300 <= len(p["spark_full"]) <= 520
+    assert p["spark_full"][-1] == round(series[-1][1], 1)   # 末点必在
+    assert len(p["spark"]) == 90                            # 90d 视图不变
+    assert p["spark_full_start"] == datetime.datetime.utcfromtimestamp(
+        series[0][0] / 1000).strftime("%Y-%m")
+
+
+def test_assemble_panel_spark_full_empty_when_no_hist(monkeypatch):
+    now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    monkeypatch.setattr(opt, "_now", lambda: now)
+    monkeypatch.setattr(opt, "_load_dvol_store", lambda: [])
+    monkeypatch.setattr(opt, "fetch_dvol_history", lambda a, b: [])
+    monkeypatch.setattr(opt, "_fetch_chain", lambda: (_chain(), 64000.0))
+    p = opt._assemble_panel()
+    assert p["spark_full"] == [] and p["spark_full_start"] is None
+
+
 def test_backfill_dvol_idempotent(tmp_path, monkeypatch):
     from btc_dashboard import backfill
     monkeypatch.setattr(backfill, "fetch_dvol_history",
