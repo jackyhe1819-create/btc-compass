@@ -1,0 +1,265 @@
+{
+ "study": "vrp",
+ "dvol_span": "2021-03-24 → 2026-07-13",
+ "price_span": "2010-07-18 → 2026-05-23",
+ "iv_price_overlap": {
+  "n": 1887,
+  "span": "2021-03-24 → 2026-05-23"
+ },
+ "by_rv_window": {
+  "rv30": {
+   "vrp_var": {
+    "fwd30": {
+     "ic": -0.088,
+     "n": 1493
+    },
+    "fwd60": {
+     "ic": -0.13,
+     "n": 1463
+    },
+    "fwd90": {
+     "ic": -0.067,
+     "n": 1433
+    },
+    "max_abs_ic": 0.13,
+    "sign_consistent": true,
+    "verdict": "score",
+    "pct_span": "2022-03-23 → 2026-05-23"
+   },
+   "vrp_vol": {
+    "fwd30": {
+     "ic": -0.082,
+     "n": 1493
+    },
+    "fwd60": {
+     "ic": -0.114,
+     "n": 1463
+    },
+    "fwd90": {
+     "ic": -0.027,
+     "n": 1433
+    },
+    "max_abs_ic": 0.114,
+    "sign_consistent": true,
+    "verdict": "score",
+    "pct_span": "2022-03-23 → 2026-05-23"
+   },
+   "rv_only": {
+    "fwd30": {
+     "ic": -0.031,
+     "n": 5365
+    },
+    "fwd60": {
+     "ic": -0.095,
+     "n": 5335
+    },
+    "fwd90": {
+     "ic": -0.141,
+     "n": 5305
+    },
+    "max_abs_ic": 0.141,
+    "sign_consistent": true,
+    "verdict": "score",
+    "pct_span": "2011-08-16 → 2026-05-23"
+   },
+   "cluster_vrp_var_hi": {
+    "high_days": 19,
+    "n_clusters": 13,
+    "years": [
+     2022,
+     2023,
+     2024,
+     2026
+    ],
+    "eff_dof_ratio": 0.684
+   },
+   "vrp_var_stats": {
+    "neg_frac": 0.184,
+    "mean": 0.103
+   }
+  },
+  "rv60": {
+   "vrp_var": {
+    "fwd30": {
+     "ic": -0.13,
+     "n": 1493
+    },
+    "fwd60": {
+     "ic": -0.094,
+     "n": 1463
+    },
+    "fwd90": {
+     "ic": -0.112,
+     "n": 1433
+    },
+    "max_abs_ic": 0.13,
+    "sign_consistent": true,
+    "verdict": "score",
+    "pct_span": "2022-03-23 → 2026-05-23"
+   },
+   "vrp_vol": {
+    "fwd30": {
+     "ic": -0.121,
+     "n": 1493
+    },
+    "fwd60": {
+     "ic": -0.079,
+     "n": 1463
+    },
+    "fwd90": {
+     "ic": -0.085,
+     "n": 1433
+    },
+    "max_abs_ic": 0.121,
+    "sign_consistent": true,
+    "verdict": "score",
+    "pct_span": "2022-03-23 → 2026-05-23"
+   },
+   "rv_only": {
+    "fwd30": {
+     "ic": -0.06,
+     "n": 5335
+    },
+    "fwd60": {
+     "ic": -0.116,
+     "n": 5305
+    },
+    "fwd90": {
+     "ic": -0.154,
+     "n": 5275
+    },
+    "max_abs_ic": 0.154,
+    "sign_consistent": true,
+    "verdict": "score",
+    "pct_span": "2011-09-15 → 2026-05-23"
+   },
+   "cluster_vrp_var_hi": {
+    "high_days": 43,
+    "n_clusters": 11,
+    "years": [
+     2022,
+     2023,
+     2024,
+     2026
+    ],
+    "eff_dof_ratio": 0.256
+   },
+   "vrp_var_stats": {
+    "neg_frac": 0.233,
+    "mean": 0.0976
+   }
+  },
+  "rv90": {
+   "vrp_var": {
+    "fwd30": {
+     "ic": -0.042,
+     "n": 1493
+    },
+    "fwd60": {
+     "ic": -0.042,
+     "n": 1463
+    },
+    "fwd90": {
+     "ic": -0.041,
+     "n": 1433
+    },
+    "max_abs_ic": 0.042,
+    "sign_consistent": true,
+    "verdict": "display_only",
+    "pct_span": "2022-03-23 → 2026-05-23"
+   },
+   "vrp_vol": {
+    "fwd30": {
+     "ic": -0.04,
+     "n": 1493
+    },
+    "fwd60": {
+     "ic": -0.041,
+     "n": 1463
+    },
+    "fwd90": {
+     "ic": -0.036,
+     "n": 1433
+    },
+    "max_abs_ic": 0.041,
+    "sign_consistent": true,
+    "verdict": "display_only",
+    "pct_span": "2022-03-23 → 2026-05-23"
+   },
+   "rv_only": {
+    "fwd30": {
+     "ic": -0.101,
+     "n": 5305
+    },
+    "fwd60": {
+     "ic": -0.149,
+     "n": 5275
+    },
+    "fwd90": {
+     "ic": -0.181,
+     "n": 5245
+    },
+    "max_abs_ic": 0.181,
+    "sign_consistent": true,
+    "verdict": "score",
+    "pct_span": "2011-10-15 → 2026-05-23"
+   },
+   "cluster_vrp_var_hi": {
+    "high_days": 49,
+    "n_clusters": 10,
+    "years": [
+     2022,
+     2024,
+     2025,
+     2026
+    ],
+    "eff_dof_ratio": 0.204
+   },
+   "vrp_var_stats": {
+    "neg_frac": 0.264,
+    "mean": 0.0909
+   }
+  }
+ },
+ "calibration_iv_dvol": {
+  "fwd30": {
+   "ic": 0.05,
+   "n": 1493
+  },
+  "fwd60": {
+   "ic": 0.025,
+   "n": 1463
+  },
+  "fwd90": {
+   "ic": -0.039,
+   "n": 1433
+  },
+  "max_abs_ic": 0.05,
+  "sign_consistent": false,
+  "verdict": "display_only",
+  "pct_span": "2022-03-23 → 2026-07-13"
+ },
+ "mechanical_gate": {
+  "pass": true,
+  "vrp_var_verdict_by_window": {
+   "30": "score",
+   "60": "score",
+   "90": "display_only"
+  },
+  "note": "任一 RV 窗的 VRP_var 过 |IC|≥0.08+符号一致 即机械通过; 机械门必要非充分。"
+ },
+ "robustness": {
+  "window_dependent": true,
+  "best_vrp_max_abs_ic": 0.13,
+  "best_rv_only_max_abs_ic": 0.181,
+  "outcompeted_by_pure_rv": true,
+  "min_eff_dof_ratio": 0.204
+ },
+ "verdict": "display_only",
+ "verdict_reason": "机械门表面通过(VRP_var RV=30d/60d 过 |IC|≥0.08+符号一致), 但稳健性三重否决: (1)窗口依赖 —— VRP_var 判定随 RV 窗 30/60(score)↔90(display_only)翻转; (2)非 IID —— 高 VRP 日仅 ~10-13 个独立波动 regime(eff_dof 比例见robustness.min_eff_dof_ratio), 名义 n≈1460 是幻觉, 无统计功效; (3)被反超 —— 纯 RV(零期权依赖, 15y 历史)max|IC| ≥ VRP, 期权数据无净增量。方向为'应力持续走弱'与'收溢价'叙事相反。→ 维持 display_only, 不进战术分。",
+ "honest_note": "高置信结论是'不该现在计分', 非'已证明无方差溢价'(absence of evidence ≠ evidence of absence)。trailing-RV 是 E_t[未来RV] 的后视代理, 掺入波动动量;真 VRP 需 HAR-RV 之类前瞻化。有效自由度仅 ~10-13, 任何 PASS/FAIL 统计功效都不足。此结论与 DVOL(options_study.json) 同款小样本/非IID硬约束。",
+ "cross_ref": {
+  "options_study": "output/options_study.json (DVOL 水平, display_only)",
+  "scratchpad_origin": "scratchpad/vrp_study.py (本研究首跑草稿, 已提升为本脚本)"
+ }
+}
