@@ -1,5 +1,5 @@
 """BTC 到期价格的风险中性概率分布 (Breeden-Litzenberger, numpy-only) + Polymarket 叠加。仅展示。"""
-import datetime, math
+import datetime, math, json as _json, time, urllib.request, urllib.parse
 from typing import List, Optional, Callable
 import numpy as np
 
@@ -114,3 +114,42 @@ def risk_neutral_density(chain: List[dict], spot: float,
         "expected_move_pct": round((p84 - p16) / 2 / F * 100, 1),
         "p_up": P_gt(spot), "tails": tails,
     }
+
+
+_POLY_URL = "https://gamma-api.polymarket.com/markets?closed=false&active=true&limit=200"
+_UA = "Mozilla/5.0 (compatible; btc-compass/1.0)"
+_poly_cache = {"data": None, "ts": 0.0}
+_POLY_TTL = 1800
+
+
+def _poly_get() -> list:
+    req = urllib.request.Request(_POLY_URL, headers={"User-Agent": _UA})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        d = _json.load(r)
+    return d if isinstance(d, list) else d.get("data", [])
+
+
+def fetch_polymarket_btc() -> List[dict]:
+    now = time.time()
+    if _poly_cache["data"] is not None and now - _poly_cache["ts"] < _POLY_TTL:
+        return _poly_cache["data"]
+    out = []
+    try:
+        for m in _poly_get():
+            q = m.get("question", "") or ""
+            ql = q.lower()
+            if "bitcoin" not in ql and "btc" not in ql:
+                continue
+            if "ethereum" in ql or "eth" in ql:
+                continue
+            op = m.get("outcomePrices")
+            if isinstance(op, str):
+                try: op = _json.loads(op)
+                except Exception: op = None
+            yes = round(float(op[0]) * 100, 1) if op else None
+            out.append({"q": q[:70], "yes": yes, "end": (m.get("endDate") or "")[:10]})
+        out = out[:6]
+        _poly_cache.update(data=out, ts=now)
+    except Exception:
+        out = []
+    return out

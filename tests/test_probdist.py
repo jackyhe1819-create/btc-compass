@@ -1,7 +1,18 @@
 import datetime, math
+import pytest
 from btc_dashboard.probdist import _ncdf, _black76_call, nearest_monthly, fit_smile, risk_neutral_density
+from btc_dashboard import probdist as pd_
 
 UTC = datetime.timezone.utc
+
+@pytest.fixture(autouse=True)
+def _clear_poly_cache():
+    """Clear Polymarket cache before each test."""
+    pd_._poly_cache["data"] = None
+    pd_._poly_cache["ts"] = 0.0
+    yield
+    pd_._poly_cache["data"] = None
+    pd_._poly_cache["ts"] = 0.0
 
 def test_ncdf_known():
     assert abs(_ncdf(0) - 0.5) < 1e-9
@@ -63,3 +74,16 @@ def test_rnd_too_few_strikes_returns_none():
     thin = [{"instrument_name": f"BTC-31JUL26-{k}-C", "mark_iv": 60, "underlying_price": 60000}
             for k in (58000, 60000, 62000)]           # 仅 3 个
     assert risk_neutral_density(thin, 60000, now) is None
+
+def test_polymarket_parse(monkeypatch):
+    monkeypatch.setattr(pd_, "_poly_get", lambda: [
+        {"question": "Will bitcoin hit $200k in 2026?", "outcomePrices": ["0.18","0.82"], "endDate": "2026-12-31T00:00:00Z"},
+        {"question": "Will Ethereum flip Bitcoin?", "outcomePrices": ["0.03","0.97"], "endDate": "2026-12-31"},
+    ])
+    out = pd_.fetch_polymarket_btc()
+    assert len(out) == 1 and out[0]["yes"] == 18.0 and out[0]["end"] == "2026-12-31"
+
+def test_polymarket_failure_returns_empty(monkeypatch):
+    def boom(): raise RuntimeError("403")
+    monkeypatch.setattr(pd_, "_poly_get", boom)
+    assert pd_.fetch_polymarket_btc() == []
