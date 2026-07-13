@@ -146,7 +146,9 @@ def _assemble_panel() -> Dict:
     try:
         hist = fetch_dvol_history(start, end)
     except Exception:
-        hist, partial = [], True
+        hist = []
+    if not hist:
+        partial = True   # 合法空响应与抓取失败同等对待: DVOL 侧缺失即 partial
     closes = [v for _, v in hist]
     dvol_now = closes[-1] if closes else None
     dvol_pct, n = (calc_dvol_percentile(closes, dvol_now) if dvol_now else (None, 0))

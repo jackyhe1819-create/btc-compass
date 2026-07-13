@@ -112,6 +112,19 @@ def test_assemble_panel_partial_on_chain_failure(monkeypatch):
     assert result["n_contracts"] == 0
 
 
+def test_assemble_panel_partial_on_empty_dvol(monkeypatch):
+    # DVOL 接口返回合法空 data(非异常)时也必须标 partial —
+    # 否则 dvol 全 None 的空壳会被当"完整"数据写入三层缓存(SWR 守卫依赖 partial 语义)
+    now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    monkeypatch.setattr(opt, "_now", lambda: now)
+    monkeypatch.setattr(opt, "fetch_dvol_history", lambda a, b: [])
+    monkeypatch.setattr(opt, "_fetch_chain", lambda: (_chain(), 64000.0))
+    p = opt._assemble_panel()
+    assert p["partial"] is True
+    assert p["dvol_now"] is None
+    assert p["put_call_oi"] == 3.19   # 链侧不受 DVOL 空数据影响, 仍正常计算
+
+
 def test_backfill_dvol_idempotent(tmp_path, monkeypatch):
     from btc_dashboard import backfill
     monkeypatch.setattr(backfill, "fetch_dvol_history",
