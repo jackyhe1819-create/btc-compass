@@ -112,6 +112,18 @@ def test_assemble_panel_partial_on_chain_failure(monkeypatch):
     assert result["n_contracts"] == 0
 
 
+def test_fetch_chain_spot_uses_nearest_expiry(monkeypatch):
+    # underlying_price 是各到期日的合成远期价且 API 不保证返回顺序 —
+    # 首条故意放远月(升水 70000), spot 必须取到期最近合约的值, 不受行序影响
+    raw = [
+        {"instrument_name": "BTC-25DEC26-64000-C", "underlying_price": 70000},
+        {"instrument_name": "BTC-24JUL26-64000-C", "underlying_price": 64000},
+    ]
+    monkeypatch.setattr(opt, "_get", lambda method, **kw: raw)
+    chain, spot = opt._fetch_chain()
+    assert spot == 64000
+
+
 def test_assemble_panel_partial_on_empty_dvol(monkeypatch):
     # DVOL 接口返回合法空 data(非异常)时也必须标 partial —
     # 否则 dvol 全 None 的空壳会被当"完整"数据写入三层缓存(SWR 守卫依赖 partial 语义)

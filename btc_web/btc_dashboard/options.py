@@ -134,7 +134,19 @@ def fetch_dvol_history(start_ms: int, end_ms: int) -> List[Tuple[int, float]]:
 
 def _fetch_chain():
     chain = _get("get_book_summary_by_currency", currency="BTC", kind="option")
-    spot = next((x["underlying_price"] for x in chain if x.get("underlying_price")), None)
+    # underlying_price 是各自到期日的合成远期价(非指数现价), 且 API 不保证返回顺序 —
+    # 取到期最近合约的值: 最近月合成远期 ≈ 现价(误差 <0.5%), 远月升水可达数个百分点
+    spot, best_exp = None, None
+    for x in chain:
+        up = x.get("underlying_price")
+        if not up:
+            continue
+        try:
+            exp, _, _ = parse_instrument(x["instrument_name"])
+        except Exception:
+            continue
+        if best_exp is None or exp < best_exp:
+            best_exp, spot = exp, up
     return chain, spot
 
 
