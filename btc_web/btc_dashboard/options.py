@@ -101,8 +101,8 @@ def calc_dvol_percentile(closes: List[float], current: float,
 
 
 _BASE = "https://www.deribit.com/api/v2/public/"
-_panel_cache = {"data": None, "ts": 0.0}
-_PANEL_TTL = 600
+_chain_cache = {"data": None, "ts": 0.0}
+_CHAIN_TTL = 120   # 期权/概率分布两面板的刷新相隔数秒, 短缓存让一次链请求喂两张卡
 
 _DVOL_STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "dvol_history.json")
 _DVOL_START_MS = 1616544000000  # 2021-03-24 DVOL inception (与 backfill._DVOL_START_MS 同值)
@@ -150,6 +150,9 @@ def fetch_dvol_history(start_ms: int, end_ms: int) -> List[Tuple[int, float]]:
 
 
 def _fetch_chain():
+    t = time.time()
+    if _chain_cache["data"] and t - _chain_cache["ts"] < _CHAIN_TTL:
+        return _chain_cache["data"]
     chain = _get("get_book_summary_by_currency", currency="BTC", kind="option")
     # underlying_price 是各自到期日的合成远期价(非指数现价), 且 API 不保证返回顺序 —
     # 取到期最近合约的值: 最近月合成远期 ≈ 现价(误差 <0.5%), 远月升水可达数个百分点
@@ -164,6 +167,7 @@ def _fetch_chain():
             continue
         if best_exp is None or exp < best_exp:
             best_exp, spot = exp, up
+    _chain_cache.update(data=(chain, spot), ts=time.time())
     return chain, spot
 
 
@@ -214,10 +218,6 @@ def _assemble_panel() -> Dict:
 
 
 def fetch_options_panel() -> Dict:
-    now = time.time()
-    if _panel_cache["data"] and now - _panel_cache["ts"] < _PANEL_TTL:
-        return _panel_cache["data"]
-    data = _assemble_panel()
-    if not data.get("partial"):
-        _panel_cache.update(data=data, ts=now)
-    return data
+    """装配期权面板。面板级缓存/防抖归 app 层 PanelCache — 此处不再有模块缓存
+    (旧 _panel_cache 与 app TTL 相同且时间戳恒更早, 生产零命中, 纯死重)。"""
+    return _assemble_panel()

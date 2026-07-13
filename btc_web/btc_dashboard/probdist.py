@@ -188,16 +188,10 @@ from .options import _fetch_chain
 
 _RND_KEYS = ["expiry", "days", "spot", "forward", "pdf", "median", "mode", "mean",
              "p16", "p84", "expected_move_pct", "p_up", "tails"]
-_panel_cache = {"data": None, "ts": 0.0}
-_PANEL_TTL = 600
 
 
 def _now() -> datetime.datetime:
     return datetime.datetime.now(UTC)
-
-
-def _fetch_chain_cached():
-    return _fetch_chain()          # 复用 options 的链抓取(无链级缓存; 缓存在面板层, 故与期权面板各拉一次链)
 
 
 def _assemble_probdist() -> dict:
@@ -205,7 +199,8 @@ def _assemble_probdist() -> dict:
     partial = False
     rnd = None
     try:
-        chain, spot = _fetch_chain_cached()
+        # options._fetch_chain 自带 120s 链缓存: 与期权面板共享一次链请求, 两卡 spot 天然一致
+        chain, spot = _fetch_chain()
         rnd = risk_neutral_density(chain, spot, now)
     except Exception:
         rnd = None
@@ -217,10 +212,5 @@ def _assemble_probdist() -> dict:
 
 
 def fetch_probdist_panel() -> dict:
-    now = time.time()
-    if _panel_cache["data"] is not None and now - _panel_cache["ts"] < _PANEL_TTL:
-        return _panel_cache["data"]
-    data = _assemble_probdist()
-    if not data.get("partial"):
-        _panel_cache.update(data=data, ts=now)
-    return data
+    """装配概率分布面板。面板级缓存归 app 层 PanelCache(同 options)。"""
+    return _assemble_probdist()

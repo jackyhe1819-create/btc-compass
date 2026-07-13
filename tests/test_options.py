@@ -235,6 +235,21 @@ def test_assemble_panel_spark_full_empty_when_no_hist(monkeypatch):
     assert p["spark_full"] == [] and p["spark_full_start"] is None
 
 
+def test_fetch_chain_cached_within_ttl(monkeypatch):
+    # 期权/概率分布两面板刷新相隔数秒, 120s 链缓存让一次链请求喂两张卡(Y6)
+    monkeypatch.setattr(opt, "_chain_cache", {"data": None, "ts": 0.0})
+    calls = []
+    raw = [{"instrument_name": "BTC-24JUL26-64000-C", "underlying_price": 64000}]
+    def fake_get(method, **kw):
+        calls.append(method)
+        return raw
+    monkeypatch.setattr(opt, "_get", fake_get)
+    a = opt._fetch_chain()
+    b = opt._fetch_chain()
+    assert len(calls) == 1          # 第二次走缓存
+    assert a == b == (raw, 64000)
+
+
 def test_backfill_dvol_idempotent(tmp_path, monkeypatch):
     from btc_dashboard import backfill
     monkeypatch.setattr(backfill, "fetch_dvol_history",
