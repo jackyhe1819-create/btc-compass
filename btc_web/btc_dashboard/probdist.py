@@ -6,6 +6,12 @@ import numpy as np
 UTC = datetime.timezone.utc
 
 
+def _trapz(y: "np.ndarray", x: "np.ndarray") -> float:
+    """梯形积分, 版本无关。numpy 2.x 已移除 np.trapz(生产 numpy 2.5 会 AttributeError),
+    np.trapezoid 又在 numpy<2.0 不存在(requirements 允许 >=1.24), 故手写覆盖全版本。"""
+    return float(np.sum((y[1:] + y[:-1]) / 2.0 * np.diff(x)))
+
+
 def _ncdf(x: float) -> float:
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
@@ -80,7 +86,7 @@ def risk_neutral_density(chain: List[dict], spot: float,
         dK = grid[1] - grid[0]
         pdf = np.zeros(_GRID_N)
         pdf[1:-1] = np.maximum((C[2:] - 2 * C[1:-1] + C[:-2]) / (dK * dK), 0.0)
-        area = float(np.trapz(pdf, grid))
+        area = _trapz(pdf, grid)
         if not (area > 0) or not np.isfinite(area):
             return None
         pdf = pdf / area
@@ -98,7 +104,7 @@ def risk_neutral_density(chain: List[dict], spot: float,
 
     median, p16, p84 = q(0.5), q(0.16), q(0.84)
     mode = float(grid[int(np.argmax(pdf))])
-    mean = float(np.trapz(grid * pdf, grid))
+    mean = _trapz(grid * pdf, grid)
     base = 5000
     lo = int(math.floor(spot * 0.85 / base) * base)
     hi = int(math.ceil(spot * 1.15 / base) * base)
