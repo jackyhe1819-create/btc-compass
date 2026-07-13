@@ -1,5 +1,5 @@
 """BTC 到期价格的风险中性概率分布 (Breeden-Litzenberger, numpy-only) + Polymarket 叠加。仅展示。"""
-import datetime, math, json as _json, time, urllib.request, urllib.parse
+import datetime, math, json as _json, time, urllib.request
 from typing import List, Optional, Callable
 import numpy as np
 
@@ -140,7 +140,7 @@ def fetch_polymarket_btc() -> List[dict]:
             ql = q.lower()
             if "bitcoin" not in ql and "btc" not in ql:
                 continue
-            if "ethereum" in ql or "eth" in ql:
+            if "ethereum" in ql:
                 continue
             op = m.get("outcomePrices")
             if isinstance(op, str):

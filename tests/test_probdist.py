@@ -87,3 +87,12 @@ def test_polymarket_failure_returns_empty(monkeypatch):
     def boom(): raise RuntimeError("403")
     monkeypatch.setattr(pd_, "_poly_get", boom)
     assert pd_.fetch_polymarket_btc() == []
+
+def test_polymarket_eth_filter_not_over_broad(monkeypatch):
+    monkeypatch.setattr(pd_, "_poly_get", lambda: [
+        {"question": "Will Bitcoin hit $200k whether or not the ETF passes?", "outcomePrices": ["0.12","0.88"], "endDate": "2026-12-31"},
+        {"question": "Will Ethereum flip Bitcoin?", "outcomePrices": ["0.03","0.97"], "endDate": "2026-12-31"},
+    ])
+    qs = [m["q"] for m in pd_.fetch_polymarket_btc()]
+    assert any("whether" in q for q in qs)        # 含 whether(内含 eth 子串)的真 BTC 市场不被误删
+    assert not any("Ethereum" in q for q in qs)   # ETH 市场仍排除
