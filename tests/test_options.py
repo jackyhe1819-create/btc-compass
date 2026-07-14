@@ -6,7 +6,7 @@ UTC = datetime.timezone.utc
 
 def test_parse_instrument():
     exp, strike, cp = parse_instrument("BTC-28AUG26-60000-C")
-    assert exp == datetime.datetime(2026, 8, 28, tzinfo=UTC)
+    assert exp == datetime.datetime(2026, 8, 28, 8, tzinfo=UTC)   # Deribit 期权 08:00 UTC 到期
     assert strike == 60000.0
     assert cp == "C"
 

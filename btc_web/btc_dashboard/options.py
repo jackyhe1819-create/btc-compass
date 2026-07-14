@@ -12,7 +12,7 @@ UTC = datetime.timezone.utc
 
 def parse_instrument(name: str) -> Tuple[datetime.datetime, float, str]:
     p = name.split("-")            # BTC-28AUG26-60000-C
-    exp = datetime.datetime.strptime(p[1], "%d%b%y").replace(tzinfo=UTC)
+    exp = datetime.datetime.strptime(p[1], "%d%b%y").replace(hour=8, tzinfo=UTC)  # Deribit 期权 08:00 UTC 到期
     return exp, float(p[2]), p[3]
 
 

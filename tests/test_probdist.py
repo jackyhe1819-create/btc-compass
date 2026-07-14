@@ -116,7 +116,7 @@ def test_assemble_panel_rnd_fail_partial(monkeypatch):
 
 
 def test_forward_from_parity():
-    exp = datetime.datetime(2026, 7, 31, tzinfo=UTC)
+    exp = datetime.datetime(2026, 7, 31, 8, tzinfo=UTC)   # parse_instrument 的 08:00 UTC 到期口径
     # ATM K=60000: C mark 0.05 BTC, P mark 0.03 BTC, underlying 60000
     #  C_usd=3000, P_usd=1800 → F = 60000 + (3000-1800) = 61200
     chain = [
@@ -128,7 +128,7 @@ def test_forward_from_parity():
 
 
 def test_forward_from_parity_fallback_spot():
-    exp = datetime.datetime(2026, 7, 31, tzinfo=UTC)
+    exp = datetime.datetime(2026, 7, 31, 8, tzinfo=UTC)   # 08:00 口径: 保证到期匹配, 回退原因确为"无双边"
     # 无 ATM 双边(只有 C) → 退回 spot
     chain = [{"instrument_name": "BTC-31JUL26-60000-C", "mark_price": 0.05, "underlying_price": 60000}]
     assert pd_._forward_from_parity(chain, 63000, exp) == 63000.0
