@@ -132,3 +132,22 @@ def test_forward_from_parity_fallback_spot():
     # 无 ATM 双边(只有 C) → 退回 spot
     chain = [{"instrument_name": "BTC-31JUL26-60000-C", "mark_price": 0.05, "underlying_price": 60000}]
     assert pd_._forward_from_parity(chain, 63000, exp) == 63000.0
+
+
+def _pgt_at(rnd_result, price):
+    """从返回的 pdf 点独立重建 CDF 在 price 处的 P_gt — 用于往返自洽断言。"""
+    import numpy as _np
+    xs = _np.array([p[0] for p in rnd_result["pdf"]], float)
+    ys = _np.array([p[1] for p in rnd_result["pdf"]], float)
+    cdf = _np.concatenate([[0.0], _np.cumsum((ys[1:] + ys[:-1]) / 2 * _np.diff(xs))])
+    cdf = cdf / cdf[-1]
+    return float((1 - _np.interp(price, xs, cdf)) * 100)
+
+
+def test_quantile_interpolation_not_staircase():
+    # 自洽性: median = q(0.5), 故独立重建的 P(S > median) 应≈50。
+    # 阶梯查表把 median 向上量化最多一格 dK → 偏离可达 ~1pp; 插值后 ≤0.5pp。
+    now = datetime.datetime(2026, 7, 13, tzinfo=UTC)
+    r = risk_neutral_density(_synth_chain(), 60000, now)
+    assert r is not None
+    assert abs(_pgt_at(r, r["median"]) - 50.0) <= 0.5

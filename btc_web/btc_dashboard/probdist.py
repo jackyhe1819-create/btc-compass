@@ -118,12 +118,10 @@ def risk_neutral_density(chain: List[dict], spot: float,
     cdf = np.concatenate([[0.0], np.cumsum((pdf[1:] + pdf[:-1]) / 2 * dK)])
 
     def q(p):
-        i = int(np.searchsorted(cdf, p))
-        return float(grid[min(i, _GRID_N - 1)])
+        return float(np.interp(p, cdf, grid))     # 线性插值, 消除一格 dK 的阶梯量化偏差
 
     def P_gt(x):
-        i = int(np.searchsorted(grid, x))
-        return round(float(1 - cdf[min(i, _GRID_N - 1)]) * 100, 1)
+        return round(float(1.0 - np.interp(x, grid, cdf)) * 100, 1)
 
     median, p16, p84 = q(0.5), q(0.16), q(0.84)
     mode = float(grid[int(np.argmax(pdf))])
