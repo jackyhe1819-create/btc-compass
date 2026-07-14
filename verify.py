@@ -352,6 +352,56 @@ def probe_runtime(base_url) -> None:
         else:
             _report("OK", f"{label}存活 ({', '.join(req_keys)})")
 
+    # 规律版块三端点 (2026-07 审查: 曾在全部质量闸门零覆盖, 端点挂了没人知道)
+    # 展示卡性质: 只 WARN 不翻退出码; 额外做策展资产年龄 + 相位翻页过期检测
+    def _asset_age_days(gen):
+        try:
+            return (datetime.now() - datetime.strptime(str(gen)[:10], "%Y-%m-%d")).days
+        except Exception:
+            return None
+
+    for path, label, req_keys in (
+            ("/api/cycle-events", "周期相位卡", ("current", "cycle_phases", "events")),
+            ("/api/roadmap", "路线图卡", ("eras", "current")),
+            ("/api/market-patterns", "市场规律卡",
+             ("rates", "seasonality", "blackswan", "forward_risk"))):
+        try:
+            d = _fetch_json(f"{base_url}{path}")
+        except Exception as e:
+            _report("WARN", f"{path} 探测失败: {e}")
+            continue
+        dead = [k for k in req_keys if not d.get(k)]
+        if dead:
+            _report("WARN", f"{label}关键字段缺失/为空: {', '.join(dead)}")
+        else:
+            _report("OK", f"{label}存活 ({', '.join(req_keys)})")
+
+        # 资产年龄: 策展 JSON 无自动更新, 超一年提示重跑研究脚本复核
+        age = _asset_age_days(d.get("generated"))
+        if age is not None and age > 365:
+            _report("WARN", f"{label}资产已 {age} 天未再生成, 建议重跑 backtest 研究脚本复核")
+
+        # 相位翻页: 进行中(partial)周期行所在相位应包含当前月数, 否则资产跨相位过期
+        if path == "/api/cycle-events" and not dead:
+            try:
+                import re as _re
+                cur_m = d["current"]["months_since_halving"]
+                for ph in d.get("cycle_phases", []):
+                    if not any(c.get("partial") for c in ph.get("cycles", [])):
+                        continue
+                    m = _re.search(r"(\d+)-(\d+)", ph.get("phase", ""))
+                    if m and not (int(m.group(1)) <= cur_m < int(m.group(2))):
+                        _report("WARN", (f"周期相位卡资产已翻页 (当前 {cur_m} 月越出进行中行"
+                                         f"「{ph['phase']}」), 需重跑 backtest/calendar_study.py"))
+            except Exception:
+                pass
+
+        # 前瞻雷达事实快照 (币价/持仓/量子比特数等) 腐烂快, 超半年提示复核
+        if path == "/api/market-patterns":
+            fr_age = _asset_age_days((d.get("forward_risk") or {}).get("generated"))
+            if fr_age is not None and fr_age > 180:
+                _report("WARN", f"前瞻风险雷达事实快照已 {fr_age} 天, 建议重新核实后更新登记册")
+
     # 趋势记忆: 记录本轮指标 + 与历史比对劣化轨迹 (best-effort, 只 WARN, 不翻退出码)
     try:
         rec = _probe_metrics(base_url, data, indicators, scoring)

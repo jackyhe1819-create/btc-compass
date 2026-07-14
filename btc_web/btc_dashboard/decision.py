@@ -84,6 +84,36 @@ def _load_band_stats() -> Optional[dict]:
     return _band_stats_cache or None
 
 
+_BLACKSWAN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "data", "blackswan_events.json")
+_blackswan_stress_cache = None
+
+
+def _load_blackswan_stress() -> Optional[dict]:
+    """黑天鹅压力测试参考 (相对前30日高点回撤 中位/最差), 供决策卡换算组合回撤。
+
+    数据源 blackswan_events.json (backtest/blackswan_study.py 生成) — 单一来源
+    透传, 不在前端硬编码常数。样本为事后追认的知名暴跌, 尾部无上界。
+    """
+    global _blackswan_stress_cache
+    if _blackswan_stress_cache is None:
+        try:
+            with open(_BLACKSWAN_PATH, "r", encoding="utf-8") as f:
+                b = json.load(f)
+            dds = [e.get("dd_from_30d_high_pct") for e in b.get("events", [])
+                   if e.get("dd_from_30d_high_pct") is not None]
+            _blackswan_stress_cache = {
+                "dd_median": b["summary"]["dd_from_high_median"],
+                "dd_worst": round(min(dds), 1) if dds else None,
+                "n": b["summary"]["n"],
+                "as_of": str(b.get("generated") or "")[:10] or None,
+            }
+        except Exception as e:
+            print(f"⚠️ blackswan_events.json 加载失败 (压力测试参考不显示): {e}")
+            _blackswan_stress_cache = {}
+    return _blackswan_stress_cache or None
+
+
 def _cycle_band_idx(score: float) -> int:
     for i, (lo, *_rest) in enumerate(CYCLE_BANDS):
         if score >= lo:
@@ -229,6 +259,8 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
         },
         "hysteresis": {"delta": HYST_DELTA, "confirm": HYST_CONFIRM,
                        "history_days": len(hist_scores)},
+        # 黑天鹅压力测试参考 (n=11 事后追认样本, 非预测) — 前端换算目标仓位对应组合回撤
+        "blackswan_stress": _load_blackswan_stress(),
         "warnings": warnings,
         "stats_meta": {
             "generated": stats.get("generated") if stats else None,

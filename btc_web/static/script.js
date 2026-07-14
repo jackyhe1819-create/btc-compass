@@ -185,12 +185,11 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(renderOptions, 10 * 60 * 1000); // 期权面板缓存 TTL 10 分钟，同步刷新
     setTimeout(renderProbDist, 3000);
     setInterval(renderProbDist, 10 * 60 * 1000); // 概率分布面板缓存 TTL 10 分钟，同步刷新
+    // 规律三卡只在启动时拉一次：数据变更源是"改 JSON+重新部署"(部署伴随刷新),
+    // 定时重拉既是免费层噪声唤醒, 又会把用户正展开阅读的 <details> 当面塌缩回折叠态
     setTimeout(fetchCycleEvents, 3000);
-    setInterval(fetchCycleEvents, 60 * 60 * 1000); // 周期相位慢变，每小时刷新
     setTimeout(fetchRoadmap, 3300);
-    setInterval(fetchRoadmap, 60 * 60 * 1000); // 路线图慢变
     setTimeout(fetchMarketPatterns, 3500);
-    setInterval(fetchMarketPatterns, 60 * 60 * 1000); // 市场规律慢变
     window._compassBooted = true;
 
     // 评分历史天数切换
@@ -480,8 +479,7 @@ function renderDashboard(data) {
     renderTriggerLevels(data.trigger_levels);
 }
 
-// 周期相位与事件规律卡：60 分钟拉一次（数据慢变，与快照解耦）
-let _cycleEventsLoaded = false;
+// 周期相位与事件规律卡：启动时拉一次（数据慢变，与快照解耦）
 async function fetchCycleEvents() {
     try {
         const res = await fetch('/api/cycle-events');
@@ -491,7 +489,7 @@ async function fetchCycleEvents() {
     } catch (e) { /* 附属卡，静默失败 */ }
 }
 
-// BTC 里程碑路线图：慢变，60 分钟拉一次
+// BTC 里程碑路线图：慢变，启动时拉一次
 async function fetchRoadmap() {
     try {
         const res = await fetch('/api/roadmap');
@@ -559,7 +557,7 @@ function renderRoadmap(d) {
     el.innerHTML = `<details class="pattern-collapse"><summary class="pattern-summary"><span>🗺️ BTC 里程碑路线图 <span class="decision-freq" style="font-weight:400;">历史→未来时间轴 · 展开</span></span><span class="pattern-chev">▾</span></summary>${html}</details>`;
 }
 
-// 市场规律与风险版块：慢变，60 分钟拉一次
+// 市场规律与风险版块：慢变，启动时拉一次
 async function fetchMarketPatterns() {
     try {
         const res = await fetch('/api/market-patterns');
@@ -590,8 +588,8 @@ function renderMarketPatterns(d) {
              <td style="padding:1px 0;text-align:right;">后90天 ${sign(p.fwd90)}</td></tr>`).join('');
         html += `<div style="margin-top:6px;">
             <div style="font-size:0.82rem;font-weight:600;color:var(--text-secondary);">📉 ${r.title}</div>
-            <div style="font-size:0.72rem;color:${mut};margin:3px 0;">同样是降息，2024 与 2025 结果相反——由周期相位而非政策驱动：</div>
-            <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">${pairs}</table>
+            ${r.natural_experiment.pairs.length ? `<div style="font-size:0.72rem;color:${mut};margin:3px 0;">${r.natural_experiment.desc}</div>
+            <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">${pairs}</table>` : ''}
             <div style="font-size:0.72rem;color:var(--text-secondary);margin-top:5px;">
                 ${r.groups.map(g => `${g.name} n=${g.n}：后30天中位 ${sign(g.median)}、胜率 ${g.win}%（基线 ${g.baseline_win}%，p=${g.p} 不显著）`).join('　·　')}</div>
             <div style="font-size:0.68rem;color:${mut};margin-top:4px;line-height:1.45;">⚠️ ${r.verdict}</div>
@@ -602,12 +600,16 @@ function renderMarketPatterns(d) {
     if (d.seasonality) {
         const s = d.seasonality;
         const rows = s.items.map(it => {
-            const ok = it.p < 0.05;
+            // verdict 文案在后端写死为证伪结论; 若重跑研究后 p<0.05, 如实亮"矛盾待复核"而非渲染 "✓ 不显著" 的自打脸行
+            const contradicts = it.p < 0.05;
+            const verdictCell = contradicts
+                ? `<span style="color:var(--accent-orange);">⚠ p&lt;0.05 与证伪结论矛盾，待复核</span>`
+                : `✗ ${it.verdict}`;
             return `<tr>
                 <td style="padding:2px 8px 2px 0;color:var(--text-secondary);">${it.name}</td>
                 <td style="padding:2px 8px 2px 0;color:${mut};font-size:0.72rem;">${it.claim}</td>
                 <td style="padding:2px 8px 2px 0;text-align:right;color:${mut};font-size:0.72rem;">p=${it.p}</td>
-                <td style="padding:2px 0;text-align:right;color:${ok ? pos : neg};font-size:0.74rem;">${ok ? '✓' : '✗'} ${it.verdict}</td></tr>`;
+                <td style="padding:2px 0;text-align:right;color:${neg};font-size:0.74rem;">${verdictCell}</td></tr>`;
         }).join('');
         html += `<div style="margin-top:12px;border-top:1px dashed var(--border-color,#333);padding-top:8px;">
             <div style="font-size:0.82rem;font-weight:600;color:var(--text-secondary);">🗓️ ${s.title}</div>
@@ -694,8 +696,6 @@ function renderCycleEvents(a) {
     el.style.display = '';
 
     const cur = a.current;
-    const fmtPct = v => (v === null || v === undefined) ? '进行中'
-        : `<span style="color:${v >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'};">${v >= 0 ? '+' : ''}${v}%</span>`;
 
     // 当前相位定位条 + 仲裁句（本卡与实时周期评分冲突时, 以评分为准）
     const header = `
@@ -720,18 +720,20 @@ function renderCycleEvents(a) {
         </div>`;
     }).join('');
 
-    // 事件表（世界杯/换主席/大选）。since_event 是资产生成日快照, 如实标核实日而非"至今"
+    // 事件表（世界杯/换主席/大选）。since_event 是资产生成日快照, 如实标核实日而非"至今"。
+    // 数值一律中性色 — 已证伪规律不穿红绿"信号外衣", 档案就长档案的样子
     const asOf = (a.generated || '').slice(0, 10);
+    const fmtN = v => (v === null || v === undefined) ? '进行中' : `${v >= 0 ? '+' : ''}${v}%`;
     const evBlock = (name, ev) => {
         if (!ev || !ev.rows || !ev.rows.length) return '';
         const rows = ev.rows.map(r => {
-            const fwd = r.fwd365 !== null ? fmtPct(r.fwd365)
-                : (r.since_event !== undefined ? `${fmtPct(r.since_event)} <small>(至 ${asOf})</small>` : '进行中');
-            return `<tr>
+            const fwd = r.fwd365 !== null ? fmtN(r.fwd365)
+                : (r.since_event !== undefined ? `${fmtN(r.since_event)} <small>(至 ${asOf})</small>` : '进行中');
+            return `<tr style="color:var(--text-muted);">
                 <td style="padding:2px 8px 2px 0; color:var(--text-secondary);">${r.label}</td>
-                <td style="padding:2px 8px 2px 0; color:var(--text-muted); font-size:0.72rem;">${r.cycle_month != null ? `减半后 ${r.cycle_month}月` : '首次减半前'}</td>
-                <td style="padding:2px 8px 2px 0; text-align:right;">${fmtPct(r.drawdown_at_event)}<small style="color:var(--text-muted);"> 距前高</small></td>
-                <td style="padding:2px 0; text-align:right;">${fwd}<small style="color:var(--text-muted);"> +1y</small></td>
+                <td style="padding:2px 8px 2px 0; font-size:0.72rem;">${r.cycle_month != null ? `减半后 ${r.cycle_month}月` : '首次减半前'}</td>
+                <td style="padding:2px 8px 2px 0; text-align:right;">${fmtN(r.drawdown_at_event)}<small> 距前高</small></td>
+                <td style="padding:2px 0; text-align:right;">${fwd}<small> +1y</small></td>
             </tr>`;
         }).join('');
         return `
@@ -743,12 +745,19 @@ function renderCycleEvents(a) {
     };
 
     const events = a.events || {};
+    // 已证伪事件收进嵌套档案折叠 — 层级反映认识论地位: 一级只留相位地图(唯一候选结构)
+    const archiveInner = evBlock('世界杯', events['世界杯'])
+        + evBlock('美联储换主席', events['美联储换主席'])
+        + evBlock('美国大选', events['美国大选']);
+    const archive = archiveInner ? `
+        <details style="margin-top:10px;">
+            <summary style="cursor:pointer; font-size:0.78rem; font-weight:600; color:var(--text-muted);">📁 已证伪事件档案 — 世界杯 / 换主席 / 大选（均为减半周期的别名，仅查证用）</summary>
+            ${archiveInner}
+        </details>` : '';
     const body = header
         + `<div style="font-size:0.78rem; font-weight:600; color:var(--text-secondary); margin-top:4px;">减半周期相位地图（逐周期，不平均）</div>`
         + phaseRows
-        + evBlock('世界杯', events['世界杯'])
-        + evBlock('美联储换主席', events['美联储换主席'])
-        + evBlock('美国大选', events['美国大选'])
+        + archive
         + `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:8px; border-top:1px solid var(--border-color,#333); padding-top:6px;">${a.honest_note || ''}${asOf ? ` · 核实截至 ${asOf}` : ''}</div>`;
     // 默认折叠, 摘要保留中性相位定位 (不做"熊市段"之类 n=3 常驻暗示, 相位标签留在展开视图的地图里)
     const sumHint = `第 ${cur.cycle_no} 周期 · 减半后 ${cur.months_since_halving} 月`;
@@ -836,6 +845,11 @@ function renderDecisionPanel(d) {
         hystNote = `<div class="decision-pending muted">滞回防抖：评分档位「${c.raw_band}」未越过 ±0.05 边界，目标仓位不变</div>`;
     }
 
+    // 黑天鹅压力测试参考行 — 数值由后端从 blackswan_events.json 透传 (单一来源), 必须同给中位与最差
+    const bs = d.blackswan_stress;
+    const stressLine = (bs && bs.dd_median != null && bs.dd_worst != null && c.target_mid != null) ? `
+        <div class="decision-stats" style="font-size:0.68rem; color:var(--text-muted); margin-top:4px; line-height:1.5;">压力测试参考：历史黑天鹅相对前30日高点急跌中位 ${bs.dd_median}%、最差 ${bs.dd_worst}%（n=${bs.n} 事后追认样本，尾部无上界）→ 目标仓位中值 ${c.target_mid}% 对应组合瞬时回撤约 ${(bs.dd_median * c.target_mid / 100).toFixed(0)}% ~ ${(bs.dd_worst * c.target_mid / 100).toFixed(0)}%</div>` : '';
+
     document.getElementById('decisionCycle').innerHTML = `
         <div class="decision-card-title">🧭 长期 · 仓位决策 <span class="decision-freq">周级变化</span></div>
         <div class="decision-main">
@@ -846,7 +860,8 @@ function renderDecisionPanel(d) {
             </div>
         </div>
         ${hystNote}
-        <div class="decision-stats">该档位 12 年回测前瞻：${statChips(c.stats, ['90d', '180d', '365d'])}</div>`;
+        <div class="decision-stats">该档位 12 年回测前瞻：${statChips(c.stats, ['90d', '180d', '365d'])}</div>
+        ${stressLine}`;
 
     document.getElementById('decisionTactical').innerHTML = `
         <div class="decision-card-title">⚡ 短期 · 执行节奏 <span class="decision-freq">日级变化</span></div>

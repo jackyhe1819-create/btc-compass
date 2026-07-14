@@ -502,13 +502,17 @@ def calc_halving_cycle() -> IndicatorResult:
     total_cycle_days = max(1, (next_halving - last_halving).days)
     progress_pct = min(100, ((total_cycle_days - days_until_next) / total_cycle_days) * 100)
     
-    # 评分逻辑
+    # 评分逻辑 (文案分段可细化, 分数档位勿动 — 影响评分历史连续性)
     if months_since <= 12:
         score, color = 1, "🟢"
         status_text = f"减半后 {months_since:.0f} 个月 (牛市起点)"
     elif months_since <= 24:
         score, color = 0, "🟡"
         status_text = f"减半后 {months_since:.0f} 个月 (周期中期)"
+    elif months_since <= 30:
+        score, color = -1, "🔴"
+        status_text = (f"减半后 {months_since:.0f} 个月 "
+                       f"(历史18-30月段 C1-C3 皆深熊, n=3 仅先验)")
     else:
         score, color = -1, "🔴"
         status_text = f"减半后 {months_since:.0f} 个月 (周期后期)"
@@ -524,8 +528,8 @@ def calc_halving_cycle() -> IndicatorResult:
         status=status,
         priority="P0",
         url="https://www.coinglass.com/halving",
-        description="比特币减半是其经济模型的核心事件，大约每四年发生一次，通常预示着牛市的到来。",
-        method="根据比特币历史减半日期，计算当前所处的减半周期阶段。减半后12个月内通常是牛市早期，24个月后可能进入周期后期。"
+        description="比特币减半是其经济模型的核心事件，大约每四年发生一次。历史上减半后进入牛市，但样本仅 n=3~4。逐周期相位地图见页底「周期相位与事件规律」卡。",
+        method="根据比特币历史减半日期，计算当前所处的减半周期阶段。减半后12个月内历史为牛市早期，24个月后历史进入周期后期（n=3~4 先验，非独立信号）。"
     )
 
 

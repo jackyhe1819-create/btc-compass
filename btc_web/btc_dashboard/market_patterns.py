@@ -33,21 +33,24 @@ def _rates_block(f):
     """利率×周期证伪: 挑同政策相反结果的对照 + 加/降息组统计 + regime。"""
     if not f:
         return None
-    ev = {r["date"]: r for r in f.get("rate_events", [])}
-    # 降息天然对照实验: 2024(减半后0年牛) vs 2025(减半后1年跌)
-    pairs = []
-    for d in ("2024-09-19", "2024-11-08", "2025-09-18", "2025-10-30"):
-        if d in ev and ev[d].get("fwd90") is not None:
-            pairs.append({"date": d, "bp": ev[d]["bp"], "cycle_year": ev[d]["cycle_year"],
-                          "fwd90": ev[d]["fwd90"]})
+    # 降息天然对照实验: 同为降息, 减半后0年 vs 1年 — 动态取两组全部事件逐次列出
+    # (fwd90 需已满90天)。重跑 fomc_study.py 自动跟进新决议; 不挑样本:
+    # 曾硬编码 4 个日期恰好剔除了 0年组的 -11% 例外, 把对照修饰得比数据更整齐
+    cuts = [r for r in f.get("rate_events", [])
+            if r.get("dir") == "降息" and r.get("fwd90") is not None]
+    pairs = [{"date": r["date"], "bp": r["bp"], "cycle_year": r["cycle_year"],
+              "fwd90": r["fwd90"]}
+             for r in sorted(cuts, key=lambda r: r["date"])
+             if r.get("cycle_year") in (0, 1)]
     hike = f.get("hike_vs_baseline_30d") or {}
     cut = f.get("cut_vs_baseline_30d") or {}
     reg = f.get("regime") or {}
     return {
         "title": "利率对 BTC 的影响 —— 方向无信号, 是周期错觉",
         "natural_experiment": {
-            "desc": "同样是降息, 结果相反 (由减半周期相位而非政策驱动)",
-            "pairs": pairs,  # 2024 降息后 +60%/+26% vs 2025 降息后 -26%/-17%
+            "desc": ("同为降息，减半后0年 vs 1年整体相反——由减半相位而非政策驱动"
+                     "（逐次全列，含例外，不挑样本）："),
+            "pairs": pairs,  # 0年组 +60/+26/-11 vs 1年组 -27/-17/-24 (2026-07 数据)
         },
         "groups": [
             {"name": "加息组", "n": hike.get("n"), "median": hike.get("median_pct"),
