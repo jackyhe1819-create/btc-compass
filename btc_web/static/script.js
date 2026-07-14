@@ -905,8 +905,9 @@ function updateTopSummaryBar(data) {
     const btcPrice = data.btc_price;
     const indicators = data.indicators || {};
     // 价格
+    // API 契约: 失败指标/字段值为 null, 而 isNaN(null)===false 会放行 → 必须用 Number.isFinite
     const priceEl = document.getElementById('summaryPrice');
-    if (priceEl) {
+    if (priceEl && Number.isFinite(btcPrice)) {
         priceEl.textContent = '$' + btcPrice.toLocaleString(undefined, {
             minimumFractionDigits: 0,
             maximumFractionDigits: 0
@@ -933,7 +934,7 @@ function updateTopSummaryBar(data) {
     const hashrateEl = document.getElementById('summaryHashrate');
     if (hashrateEl && indicators['全网算力']) {
         const val = indicators['全网算力'].value;
-        if (!isNaN(val)) {
+        if (Number.isFinite(val)) {
             hashrateEl.textContent = val.toFixed(1) + ' EH/s';
         }
     }
@@ -942,7 +943,7 @@ function updateTopSummaryBar(data) {
     const ahr999El = document.getElementById('summaryAhr999');
     if (ahr999El && indicators['Ahr999']) {
         const val = indicators['Ahr999'].value;
-        if (!isNaN(val)) {
+        if (Number.isFinite(val)) {
             ahr999El.textContent = val.toFixed(2);
             ahr999El.style.color = val < 0.45 ? 'var(--accent-green)' : (val < 1.2 ? 'var(--accent-yellow)' : 'var(--accent-red)');
         }
@@ -952,7 +953,7 @@ function updateTopSummaryBar(data) {
     const fgEl = document.getElementById('summaryFearGreed');
     if (fgEl && indicators['恐惧贪婪指数']) {
         const val = indicators['恐惧贪婪指数'].value;
-        if (!isNaN(val)) {
+        if (Number.isFinite(val)) {
             fgEl.textContent = val.toFixed(0);
             fgEl.style.color = val < 25 ? 'var(--accent-green)' : (val > 75 ? 'var(--accent-red)' : 'var(--accent-yellow)');
         }
