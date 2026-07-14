@@ -2583,6 +2583,8 @@ function renderOptionsCard(a) {
     const el = document.getElementById('optionsCard');
     if (!el) return;
     el.style.display = '';
+    const winYrs = a.dvol_window_days ? a.dvol_window_days / 365 : null;
+    const winLbl = winYrs == null ? '分位' : (winYrs >= 3.9 ? '4年分位' : `${winYrs.toFixed(1)}年分位`);
     const hasFull = (a.spark_full || []).length >= 2;
     const useFull = optSparkSpan === 'all' && hasFull;
     const spark = useFull ? a.spark_full : (a.spark || []);
@@ -2605,18 +2607,18 @@ function renderOptionsCard(a) {
     el.innerHTML = `
       <div style="text-align:right; font-size:0.72rem; color:var(--text-muted); margin-bottom:4px;">Deribit · ${a.updated_at || ''}</div>
       <div class="opt-hero">
-        <div><div class="opt-hero-label">DVOL 隐含波动率 · 4年分位</div>
+        <div><div class="opt-hero-label">DVOL 隐含波动率 · ${winLbl}</div>
           <div class="opt-hero-num">${a.dvol_now}<span class="opt-hero-unit"> 当前 IV</span></div></div>
         <div style="text-align:right;">
-          <span class="opt-pct">4年分位 ${a.dvol_pct == null ? '—' : a.dvol_pct + '%'}</span></div>
+          <span class="opt-pct">${winLbl} ${a.dvol_pct == null ? '—' : a.dvol_pct + '%'}</span></div>
       </div>
       <div class="opt-spark-bar"><span class="opt-spark-caption">${caption}</span>${toggle}</div>
-      ${pts ? `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" class="opt-spark">
+      ${pts ? `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" class="opt-spark" role="img" aria-label="DVOL 隐含波动率走势">
         <polyline points="${pts}" fill="none" stroke="var(--accent-btc,#f0864a)" stroke-width="1.5"
           stroke-linejoin="round" stroke-linecap="round"/></svg>` : ''}
       <div class="opt-grid">
         ${tile('翼部偏斜(价外5-15%)', a.skew_wing == null ? '—' : (a.skew_wing > 0 ? '+' : '') + a.skew_wing, a.skew_wing == null ? '' : (a.skew_wing > 0 ? '看跌溢价·防御' : '看涨溢价'))}
-        ${tile('Put/Call OI', a.put_call_oi == null ? '—' : a.put_call_oi, a.put_call_oi == null ? '' : (a.put_call_oi < 1 ? '看涨主导' : '看跌主导'))}
+        ${tile('Put/Call OI', a.put_call_oi == null ? '—' : a.put_call_oi, a.put_call_oi == null ? '' : (a.put_call_oi < 0.45 ? '低于常态区间(≈0.5–0.7)' : a.put_call_oi > 0.8 ? '高于常态区间(≈0.5–0.7)' : '常态区间(≈0.5–0.7)'))}
         ${tile('期限结构', a.term_slope == null ? '—' : (a.term_slope > 0 ? '+' : '') + a.term_slope, a.term_slope == null ? '' : (a.term_slope > 0 ? 'contango' : 'backwardation'))}
         ${tile('最大痛点', a.max_pain == null ? '—' : '$' + a.max_pain.toLocaleString(), a.max_pain_exp || '')}
       </div>
@@ -2799,9 +2801,9 @@ function renderDatHoldings(data) {
 
     const hdr = (txt, align) => `<span style="color: var(--text-muted); font-size: 0.7rem; padding-bottom: 4px; border-bottom: 1px solid var(--border-color);${align ? ' text-align: right;' : ''}">${txt}</span>`;
     const rows = data.companies.map(c => `
-        <span title="${c.pct_supply ? `占总供应量 ${c.pct_supply}%` : ''}">${c.name}</span>
+        <span title="${c.pct_supply ? `占总供应量 ${c.pct_supply}%` : ''}">${escapeHtml(c.name)}</span>
         <span style="text-align:right; color:var(--accent-btc);">${c.holdings.toLocaleString()}</span>
-        <span style="text-align:right; color:var(--text-muted);">${c.symbol}</span>
+        <span style="text-align:right; color:var(--text-muted);">${escapeHtml(c.symbol)}</span>
     `).join('');
 
     panel.innerHTML = `

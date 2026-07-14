@@ -16,7 +16,7 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>₿</text></svg>">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-12">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-13">
     <!-- 防止主题闪烁：在 CSS 加载前立即恢复主题（v2: 默认米白色） -->
     <script>
         (function() {
@@ -474,13 +474,13 @@
 
     <!-- BTC 期权 · 波动率与情绪 (紧随衍生品杠杆面板) -->
     <div class="priority-section" style="margin-top: 30px;">
-        <div class="section-title">📐 BTC 期权 · 波动率与情绪</div>
+        <h2 class="section-title">📐 BTC 期权 · 波动率与情绪</h2>
         <div class="decision-card" id="optionsCard" style="display:none;"></div>
     </div>
 
     <!-- BTC 概率分布 (期权隐含 RND) -->
     <div class="priority-section" style="margin-top: 30px;">
-        <div class="section-title">📊 BTC 概率分布 · 风险中性</div>
+        <h2 class="section-title">📊 BTC 概率分布 · 风险中性</h2>
         <div class="decision-card" id="probDistCard" style="display:none;"></div>
     </div>
 
@@ -939,7 +939,7 @@
         <p style="margin: 6px 0 0 0; font-size: 0.75rem; color: var(--text-muted);">点击地址即可复制</p>
     </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}?v=compass-12"></script>
+    <script src="{{ url_for('static', filename='script.js') }}?v=compass-13"></script>
 </body>
 
 </html>
