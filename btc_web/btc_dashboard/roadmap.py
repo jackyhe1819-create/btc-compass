@@ -14,12 +14,10 @@ import os
 import json
 from datetime import datetime
 
+from .core import HALVING_DATES, NEXT_HALVING_ESTIMATE
+
 _ASSET = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                       "data", "btc_roadmap.json")
-
-HALVINGS = [datetime(2012, 11, 28), datetime(2016, 7, 9),
-            datetime(2020, 5, 11), datetime(2024, 4, 20)]
-NEXT_HALVING_EST = datetime(2028, 4, 15)
 
 
 def get_roadmap():
@@ -32,14 +30,14 @@ def get_roadmap():
         return None
 
     now = datetime.now()
-    prior = [h for h in HALVINGS if h <= now]
+    prior = [h for h in HALVING_DATES if h <= now]
     months = (now - max(prior)).days / 30.44 if prior else None
     asset["current"] = {
         "as_of": now.strftime("%Y-%m-%d"),
         "halving_no": len(prior),
         "months_since_halving": round(months, 1) if months is not None else None,
-        "days_to_next_halving_est": (NEXT_HALVING_EST - now).days,
+        "days_to_next_halving_est": (NEXT_HALVING_ESTIMATE - now).days,
         "note": f"第 {len(prior)} 次减半后 {round(months, 1)} 月, 距第 {len(prior)+1} 次减半约 "
-                f"{(NEXT_HALVING_EST - now).days} 天" if months is not None else "",
+                f"{(NEXT_HALVING_ESTIMATE - now).days} 天" if months is not None else "",
     }
     return asset

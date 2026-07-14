@@ -40,8 +40,12 @@ DATA_OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 RNG = np.random.default_rng(20260711)   # 固定种子, 结果可复现
 N_PERM = 20000
 
-HALVINGS = [pd.Timestamp(d) for d in
-            ("2012-11-28", "2016-07-09", "2020-05-11", "2024-04-19")]
+# 减半日期与现网同源 (core.py 唯一事实源), 照 factors.py 先例
+_BTC_WEB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "btc_web")
+sys.path.insert(0, _BTC_WEB)
+from btc_dashboard.core import HALVING_DATES  # noqa: E402
+
+HALVINGS = [pd.Timestamp(d) for d in HALVING_DATES]
 
 CNY = [pd.Timestamp(d) for d in (
     "2011-02-03", "2012-01-23", "2013-02-10", "2014-01-31", "2015-02-19",

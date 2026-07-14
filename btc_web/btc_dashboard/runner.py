@@ -105,11 +105,8 @@ def get_sparklines(df: pd.DataFrame, indicators: dict, days: int = 7) -> dict:
     """
     sparklines = {}
     recent = df.tail(days)
-    GENESIS = pd.Timestamp("2009-01-03")
-    HALVINGS = [
-        pd.Timestamp("2012-11-28"), pd.Timestamp("2016-07-09"),
-        pd.Timestamp("2020-05-11"), pd.Timestamp("2024-04-20"),
-    ]
+    GENESIS = pd.Timestamp(GENESIS_DATE)
+    HALVINGS = [pd.Timestamp(h) for h in HALVING_DATES]
 
     # ── 预计算全局滚动序列（一次性，复用）──
     ma14g  = df['price'].rolling(14).mean()

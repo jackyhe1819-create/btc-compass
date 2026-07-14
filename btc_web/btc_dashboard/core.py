@@ -63,15 +63,16 @@ def fetch_realtime_btc_price() -> Optional[float]:
 # 比特币创世日期
 GENESIS_DATE = datetime(2009, 1, 3)
 
-# 历史减半日期
+# 历史减半日期 — 全库唯一事实源 (UTC 口径), 勿在别处复制字面量
+# (tests/test_consistency.py 有字面量守卫; 2026-07 审查曾发现 8 份拷贝分裂成 04-19/04-20 两派)
 HALVING_DATES = [
     datetime(2012, 11, 28),  # 第一次减半
     datetime(2016, 7, 9),    # 第二次减半
     datetime(2020, 5, 11),   # 第三次减半
-    datetime(2024, 4, 20),   # 第四次减半
+    datetime(2024, 4, 20),   # 第四次减半 (区块 840,000 出块于 2024-04-20 00:09 UTC)
 ]
 
-# 预计下次减半（约4年后）
+# 预计下次减半（按出块速率估算, 日历日为估计值）
 NEXT_HALVING_ESTIMATE = datetime(2028, 4, 20)
 
 

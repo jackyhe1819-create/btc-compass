@@ -554,8 +554,8 @@ function renderRoadmap(d) {
         html += `<div style="font-size:0.76rem; font-weight:600; color:${isFutureEra ? 'var(--accent-orange)' : 'var(--text-secondary)'}; margin:8px 0 2px; border-left:3px solid ${isFutureEra ? 'var(--accent-orange)' : 'var(--accent-btc)'}; padding-left:6px;">${era.era} <span style="font-weight:400; color:${mut}; font-size:0.68rem;">${era.span}</span></div>`;
         html += era.milestones.map(milestoneRow).join('');
     });
-    html += `<div style="font-size:0.7rem; color:${mut}; margin-top:8px; border-top:1px solid var(--border-color,#333); padding-top:6px;">${d.honest_note || ''}</div>`;
-    // 默认折叠（页面已很长），周期相位卡保持展开做锚点
+    html += `<div style="font-size:0.7rem; color:${mut}; margin-top:8px; border-top:1px solid var(--border-color,#333); padding-top:6px;">${d.honest_note || ''}${d.generated ? ` · 核实截至 ${d.generated}` : ''}</div>`;
+    // 默认折叠（页面已很长）
     el.innerHTML = `<details class="pattern-collapse"><summary class="pattern-summary"><span>🗺️ BTC 里程碑路线图 <span class="decision-freq" style="font-weight:400;">历史→未来时间轴 · 展开</span></span><span class="pattern-chev">▾</span></summary>${html}</details>`;
 }
 
@@ -633,7 +633,7 @@ function renderMarketPatterns(d) {
         const cnt = b.summary.counter_example;
         html += `<div style="margin-top:12px;border-top:1px dashed var(--border-color,#333);padding-top:8px;">
             <div style="font-size:0.82rem;font-weight:600;color:var(--text-secondary);">🦢 ${b.title}</div>
-            <div style="font-size:0.7rem;color:${mut};margin:2px 0;">🐻=熊市扎堆（减半后18-30月，反身性）·「高」=相对前30日高点回撤·「1y」=一年后</div>
+            <div style="font-size:0.7rem;color:${mut};margin:2px 0;">🐻=熊市扎堆（减半后18-30月，反身性）·「高」=相对前30日高点回撤·「1y」=一年后·「*」=不足一年，截至核实日</div>
             <table style="width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:2px;">${rows}</table>
             ${cnt ? `<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:4px;">💡 逆势反例 <b>${cnt.name}</b>：${cnt.note}</div>` : ''}
             <div style="font-size:0.68rem;color:${mut};margin-top:4px;line-height:1.45;">⚠️ ${b.verdict}</div>
@@ -663,7 +663,7 @@ function renderMarketPatterns(d) {
                 <div style="font-size:0.68rem;color:var(--accent-orange);line-height:1.45;">👁 预警：${r.early_warning}</div>
             </div>`;
         html += `<div style="margin-top:14px;border-top:2px solid var(--accent-orange);padding-top:8px;">
-            <div style="font-size:0.82rem;font-weight:600;color:var(--text-secondary);">🔭 ${fr.title}</div>
+            <div style="font-size:0.82rem;font-weight:600;color:var(--text-secondary);">🔭 ${fr.title}<span style="font-weight:400;font-size:0.68rem;color:${mut};"> · 事实快照核实截至 ${fr.generated || '—'}</span></div>
             <div style="font-size:0.7rem;color:${mut};margin:3px 0 6px;background:#f0864a10;padding:5px 7px;border-radius:4px;">🎯 近端重点：${fr.near_term_focus || ''}</div>
             <div style="font-size:0.76rem;font-weight:600;color:var(--text-secondary);margin-top:6px;">🦏 灰犀牛（看得见、慢移动、终将逼近）</div>
             ${fr.gray_rhino.map(riskItem).join('')}
@@ -679,7 +679,7 @@ function renderMarketPatterns(d) {
         </div>`;
     }
 
-    html += `<div style="font-size:0.7rem;color:${mut};margin-top:8px;border-top:1px solid var(--border-color,#333);padding-top:6px;">${d.honest_note || ''}</div>`;
+    html += `<div style="font-size:0.7rem;color:${mut};margin-top:8px;border-top:1px solid var(--border-color,#333);padding-top:6px;">${d.honest_note || ''}${d.generated ? ` · 核实截至 ${String(d.generated).slice(0, 10)}` : ''}</div>`;
     // 默认折叠（内容长），展开看证伪+黑天鹅+前瞻风险雷达
     el.innerHTML = `<details class="pattern-collapse"><summary class="pattern-summary"><span>🧭 市场规律与风险 <span class="decision-freq" style="font-weight:400;">证伪·黑天鹅·前瞻风险雷达 · 展开</span></span><span class="pattern-chev">▾</span></summary>${html}</details>`;
 }
@@ -697,16 +697,13 @@ function renderCycleEvents(a) {
     const fmtPct = v => (v === null || v === undefined) ? '进行中'
         : `<span style="color:${v >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'};">${v >= 0 ? '+' : ''}${v}%</span>`;
 
-    // 当前相位定位条
-    const windows = (cur.active_windows || []).map(w =>
-        `<span class="decision-stat-chip" style="background:#f0864a1a; color:#f0864a;">🎯 ${w}</span>`).join(' ');
-    // 折叠摘要保留"当前减半相位"一行, 收起时也能一眼看到大局锚点
+    // 当前相位定位条 + 仲裁句（本卡与实时周期评分冲突时, 以评分为准）
     const header = `
-        <div style="font-size:0.82rem; color:var(--text-secondary); margin:4px 0 8px;">
+        <div style="font-size:0.82rem; color:var(--text-secondary); margin:4px 0 2px;">
             当前：第 <b>${cur.cycle_no}</b> 周期 · 减半后 <b>${cur.months_since_halving}</b> 月 ·
             距下次减半约 <b>${cur.days_to_next_halving_est}</b> 天
         </div>
-        ${windows ? `<div style="margin-bottom:8px;">${windows}</div>` : ''}`;
+        <div style="font-size:0.7rem; color:var(--text-muted); margin:0 0 8px;">仓位以周期分为准 — 本卡为日历叙事背景（n=3~4），不构成独立信号</div>`;
 
     // 减半相位地图（逐周期，高亮当前所处相位）
     const curM = cur.months_since_halving;
@@ -723,15 +720,16 @@ function renderCycleEvents(a) {
         </div>`;
     }).join('');
 
-    // 事件表（世界杯/换主席/大选）
+    // 事件表（世界杯/换主席/大选）。since_event 是资产生成日快照, 如实标核实日而非"至今"
+    const asOf = (a.generated || '').slice(0, 10);
     const evBlock = (name, ev) => {
         if (!ev || !ev.rows || !ev.rows.length) return '';
         const rows = ev.rows.map(r => {
             const fwd = r.fwd365 !== null ? fmtPct(r.fwd365)
-                : (r.since_event !== undefined ? `${fmtPct(r.since_event)} <small>(至今)</small>` : '进行中');
+                : (r.since_event !== undefined ? `${fmtPct(r.since_event)} <small>(至 ${asOf})</small>` : '进行中');
             return `<tr>
                 <td style="padding:2px 8px 2px 0; color:var(--text-secondary);">${r.label}</td>
-                <td style="padding:2px 8px 2px 0; color:var(--text-muted); font-size:0.72rem;">减半后 ${r.cycle_month}月</td>
+                <td style="padding:2px 8px 2px 0; color:var(--text-muted); font-size:0.72rem;">${r.cycle_month != null ? `减半后 ${r.cycle_month}月` : '首次减半前'}</td>
                 <td style="padding:2px 8px 2px 0; text-align:right;">${fmtPct(r.drawdown_at_event)}<small style="color:var(--text-muted);"> 距前高</small></td>
                 <td style="padding:2px 0; text-align:right;">${fwd}<small style="color:var(--text-muted);"> +1y</small></td>
             </tr>`;
@@ -751,9 +749,9 @@ function renderCycleEvents(a) {
         + evBlock('世界杯', events['世界杯'])
         + evBlock('美联储换主席', events['美联储换主席'])
         + evBlock('美国大选', events['美国大选'])
-        + `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:8px; border-top:1px solid var(--border-color,#333); padding-top:6px;">${a.honest_note || ''}</div>`;
-    // 默认折叠, 摘要保留当前减半相位一览
-    const sumHint = `减半后 ${cur.months_since_halving} 月${curM >= 18 && curM <= 30 ? ' · 历史熊市段' : ''}`;
+        + `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:8px; border-top:1px solid var(--border-color,#333); padding-top:6px;">${a.honest_note || ''}${asOf ? ` · 核实截至 ${asOf}` : ''}</div>`;
+    // 默认折叠, 摘要保留中性相位定位 (不做"熊市段"之类 n=3 常驻暗示, 相位标签留在展开视图的地图里)
+    const sumHint = `第 ${cur.cycle_no} 周期 · 减半后 ${cur.months_since_halving} 月`;
     el.innerHTML = `<details class="pattern-collapse"><summary class="pattern-summary"><span>🗓️ 周期相位与事件规律 <span class="decision-freq" style="font-weight:400;">${sumHint} · 展开</span></span><span class="pattern-chev">▾</span></summary>${body}</details>`;
 }
 

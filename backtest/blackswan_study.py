@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from seasonality_study import load_price, cycle_year
+from seasonality_study import load_price, cycle_year, HALVINGS  # HALVINGS 与现网 core.py 同源
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 DATA_OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -82,8 +82,7 @@ def profile(price: pd.Series, anchor_str, name, kind, desc, last_price):
             return None
         return round((float(tgt.iloc[-1]) / ref - 1) * 100, 1)
 
-    m = [h for h in [pd.Timestamp(d) for d in
-         ("2012-11-28", "2016-07-09", "2020-05-11", "2024-04-19")] if h <= anchor]
+    m = [h for h in HALVINGS if h <= anchor]
     cyc_m = ((anchor - max(m)).days / 30.44) if m else None
 
     return {
@@ -116,6 +115,8 @@ def main():
     asset = {
         "generated": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
         "honest_note": ("黑天鹅为一次性特异事件, n=1, 无统计规律或可预测性 — 仅风险画像/复盘。"
+                        "样本为事后追认的知名暴跌 (选样偏差), BTC 存活至今才谈得上收复 "
+                        "(幸存者偏差), 汇总中位数不构成未来下界。"
                         "日线收盘低估盘中急跌。事件日期为历史事实, 非交易信号。"),
         "events": rows,
         "summary": {

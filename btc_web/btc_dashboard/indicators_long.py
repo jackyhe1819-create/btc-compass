@@ -491,15 +491,15 @@ def calc_halving_cycle() -> IndicatorResult:
     past_halvings = [d for d in HALVING_DATES if d <= today]
     last_halving = past_halvings[-1] if past_halvings else HALVING_DATES[0]
     
-    # 找到下一次减半预计日期 (约4年后)
-    next_halving = last_halving + timedelta(days=4*365)
-    
+    # 下一次减半预计日期 — 与 core.py 唯一事实源对齐, 不再现算 last+4*365 (曾造成同页三个倒计时)
+    next_halving = NEXT_HALVING_ESTIMATE
+
     # 计算距离上次减半的月数
     months_since = (today - last_halving).days / 30.44
-    
+
     # 计算距离下次减半的天数和进度
     days_until_next = (next_halving - today).days
-    total_cycle_days = 4 * 365  # 约1460天
+    total_cycle_days = max(1, (next_halving - last_halving).days)
     progress_pct = min(100, ((total_cycle_days - days_until_next) / total_cycle_days) * 100)
     
     # 评分逻辑

@@ -1,72 +1,315 @@
 {
  "generated": "2026-07-11",
  "honest_note": "BTC 里程碑路线图。日期经对抗核实(WebSearch 逐条复核)。确定性分级: 历史=已发生; 预定=按区块高度/法定时限确定(未来减半的日历日为估计, 事件按区块高度既定); 提案=BIP/软分叉提案但激活未定, 绝非既定路线。",
- "next_halving": {"est_date": "2028-04", "block": 1050000, "prev_halving": "2024-04-20"},
  "eras": [
   {
    "era": "起源与早期",
    "span": "2008-2013",
    "milestones": [
-    {"date": "2008-10-31", "name": "比特币白皮书发布", "category": "协议", "certainty": "历史", "significance": "Satoshi 在金融危机中发布《P2P 电子现金系统》, 奠定 PoW 去中心化货币的理论基础 — BTC 全部叙事的起点。"},
-    {"date": "2009-01-03", "name": "创世区块", "category": "基础设施", "certainty": "历史", "significance": "网络上线, coinbase 硬编码《泰晤士报》头条'第二轮银行救助', 成为反通胀/反救助图腾。"},
-    {"date": "2010-05-22", "name": "披萨日", "category": "市场", "certainty": "历史", "price_context": "10000 BTC≈$41", "significance": "首次以 BTC 换实物(两个披萨), 确立'币可换物'的现实价值锚。"},
-    {"date": "2010-07-18", "name": "Mt.Gox 上线", "category": "基础设施", "certainty": "历史", "price_context": "~$0.08", "significance": "首个主流交易所, 长期承接全球约 70% 交易量 — 也为 2014 崩盘埋伏笔。"},
-    {"date": "2012-11-28", "name": "首次减半", "category": "减半", "certainty": "历史", "price_context": "~$12", "significance": "区块 210,000, 奖励 50→25 BTC, 首次兑现四年一次的程序化稀缺 — 此后所有周期的核心节律。"},
-    {"date": "2013-12-05", "name": "破千美元 + 中国首次表态", "category": "监管", "certainty": "历史", "price_context": "ATH ~$1,163", "significance": "价格冲上 ~$1,163; 五部委《防范比特币风险通知》禁金融机构涉币, 触发 40%+ 回撤, 标志中国长期监管周期开端。"}
+    {
+     "date": "2008-10-31",
+     "name": "比特币白皮书发布",
+     "category": "协议",
+     "certainty": "历史",
+     "significance": "Satoshi 在金融危机中发布《P2P 电子现金系统》, 奠定 PoW 去中心化货币的理论基础 — BTC 全部叙事的起点。"
+    },
+    {
+     "date": "2009-01-03",
+     "name": "创世区块",
+     "category": "基础设施",
+     "certainty": "历史",
+     "significance": "网络上线, coinbase 硬编码《泰晤士报》头条'第二轮银行救助', 成为反通胀/反救助图腾。"
+    },
+    {
+     "date": "2010-05-22",
+     "name": "披萨日",
+     "category": "市场",
+     "certainty": "历史",
+     "price_context": "10000 BTC≈$41",
+     "significance": "首次以 BTC 换实物(两个披萨), 确立'币可换物'的现实价值锚。"
+    },
+    {
+     "date": "2010-07-18",
+     "name": "Mt.Gox 上线",
+     "category": "基础设施",
+     "certainty": "历史",
+     "price_context": "~$0.08",
+     "significance": "首个主流交易所, 长期承接全球约 70% 交易量 — 也为 2014 崩盘埋伏笔。"
+    },
+    {
+     "date": "2012-11-28",
+     "name": "首次减半",
+     "category": "减半",
+     "certainty": "历史",
+     "price_context": "~$12",
+     "significance": "区块 210,000, 奖励 50→25 BTC, 首次兑现四年一次的程序化稀缺 — 此后所有周期的核心节律。"
+    },
+    {
+     "date": "2013-12-05",
+     "name": "破千美元 + 中国首次表态",
+     "category": "监管",
+     "certainty": "历史",
+     "price_context": "ATH ~$1,163",
+     "significance": "价格冲上 ~$1,163; 五部委《防范比特币风险通知》禁金融机构涉币, 触发 40%+ 回撤, 标志中国长期监管周期开端。"
+    }
    ]
   },
   {
    "era": "扩容之战",
    "span": "2014-2017",
    "milestones": [
-    {"date": "2014-02-28", "name": "Mt.Gox 崩塌破产", "category": "黑天鹅", "certainty": "历史", "price_context": "暴跌中 ~$400-660", "significance": "全球最大交易所约 85 万枚 BTC 丢失、东京申请破产, 开启近两年熊市, 成为'自己保管私钥'叙事起点。"},
-    {"date": "2015-07-30", "name": "以太坊主网上线", "category": "市场", "certainty": "历史", "price_context": "~$285", "significance": "首个图灵完备智能合约平台, 催生 ICO 潮并开启'BTC 市占率长期下滑'、把 BTC 重定位为'数字黄金'。"},
-    {"date": "2016-07-09", "name": "第二次减半", "category": "减半", "certainty": "历史", "price_context": "~$650", "significance": "区块 420,000, 奖励 25→12.5 BTC, 为 2017 大牛市埋供给收紧伏笔。"},
-    {"date": "2017-08-01", "name": "Bitcoin Cash 硬分叉", "category": "协议", "certainty": "历史", "price_context": "~$2,800", "significance": "数年'区块大小之战'以硬分叉收场, BTC 主链选择 1MB 基础块 + 链下扩容, 确立'去中心化优先于吞吐量'的身份。"},
-    {"date": "2017-08-24", "name": "隔离见证(SegWit)激活", "category": "协议", "certainty": "历史", "price_context": "~$4,300", "significance": "区块 481,824 激活, 修复交易延展性并为闪电网络铺路 — BTC 首个重大软分叉。"},
-    {"date": "2017-09-04", "name": "中国禁 ICO + 关停境内交易所", "category": "监管", "certainty": "历史", "price_context": "~$4,600→当月 -40%", "significance": "七部委禁 ICO + 9 月中关停 BTCC/火币/OKCoin 境内业务, 中国交易所被迫出海, 直接催生币安崛起与全球交易重心西移。"},
-    {"date": "2017-12-18", "name": "CME 期货上线 + 2017 周期顶", "category": "机构", "certainty": "历史", "price_context": "~$19,000-20,000", "significance": "CME 上线受监管比特币期货, 首次给机构合规做空敞口 — 几乎与 2017 周期顶同步, 被视作见顶催化剂之一。"}
+    {
+     "date": "2014-02-28",
+     "name": "Mt.Gox 崩塌破产",
+     "category": "黑天鹅",
+     "certainty": "历史",
+     "price_context": "暴跌中 ~$400-660",
+     "significance": "全球最大交易所约 85 万枚 BTC 丢失、东京申请破产, 开启近两年熊市, 成为'自己保管私钥'叙事起点。"
+    },
+    {
+     "date": "2015-07-30",
+     "name": "以太坊主网上线",
+     "category": "市场",
+     "certainty": "历史",
+     "price_context": "~$285",
+     "significance": "首个图灵完备智能合约平台, 催生 ICO 潮并开启'BTC 市占率长期下滑'、把 BTC 重定位为'数字黄金'。"
+    },
+    {
+     "date": "2016-07-09",
+     "name": "第二次减半",
+     "category": "减半",
+     "certainty": "历史",
+     "price_context": "~$650",
+     "significance": "区块 420,000, 奖励 25→12.5 BTC, 为 2017 大牛市埋供给收紧伏笔。"
+    },
+    {
+     "date": "2017-08-01",
+     "name": "Bitcoin Cash 硬分叉",
+     "category": "协议",
+     "certainty": "历史",
+     "price_context": "~$2,800",
+     "significance": "数年'区块大小之战'以硬分叉收场, BTC 主链选择 1MB 基础块 + 链下扩容, 确立'去中心化优先于吞吐量'的身份。"
+    },
+    {
+     "date": "2017-08-24",
+     "name": "隔离见证(SegWit)激活",
+     "category": "协议",
+     "certainty": "历史",
+     "price_context": "~$4,300",
+     "significance": "区块 481,824 激活, 修复交易延展性并为闪电网络铺路 — BTC 首个重大软分叉。"
+    },
+    {
+     "date": "2017-09-04",
+     "name": "中国禁 ICO + 关停境内交易所",
+     "category": "监管",
+     "certainty": "历史",
+     "price_context": "~$4,600→当月 -40%",
+     "significance": "七部委禁 ICO + 9 月中关停 BTCC/火币/OKCoin 境内业务, 中国交易所被迫出海, 直接催生币安崛起与全球交易重心西移。"
+    },
+    {
+     "date": "2017-12-18",
+     "name": "CME 期货上线 + 2017 周期顶",
+     "category": "机构",
+     "certainty": "历史",
+     "price_context": "~$19,000-20,000",
+     "significance": "CME 上线受监管比特币期货, 首次给机构合规做空敞口 — 几乎与 2017 周期顶同步, 被视作见顶催化剂之一。"
+    }
    ]
   },
   {
    "era": "机构化",
    "span": "2018-2021",
    "milestones": [
-    {"date": "2018-03", "name": "闪电网络主网上线", "category": "基础设施", "certainty": "历史", "price_context": "~$8,000-11,000", "significance": "lnd/c-lightning/eclair 三实现主网 beta, SegWit 铺路后 BTC 二层支付扩容关键基础设施落地。"},
-    {"date": "2020-03-12", "name": "新冠黑色星期四", "category": "黑天鹅", "certainty": "历史", "price_context": "~$7,900→$3,800", "significance": "全球流动性挤兑 BTC 单日腰斩, 衍生品/交易所脆弱性暴露 — 此深坑成为随后机构大牛的起点。"},
-    {"date": "2020-05-11", "name": "第三次减半", "category": "减半", "certainty": "历史", "price_context": "~$8,600", "significance": "区块 630,000, 奖励 12.5→6.25 BTC, 为 2020-21 牛市奠定供给面。"},
-    {"date": "2020-08-11", "name": "MicroStrategy 首次购入", "category": "机构", "certainty": "历史", "price_context": "均价 $11,653", "significance": "首家上市公司将 21,454 BTC 纳入资产负债表, 开创企业金库范式, Saylor 成机构叙事旗手。"},
-    {"date": "2021-02-08", "name": "特斯拉买入 $15 亿", "category": "机构", "certainty": "历史", "price_context": "~$38k→$44k", "significance": "主流车企背书把机构 FOMO 推至高潮; 5 月又以能耗为由暂停支付, 凸显叙事反复。"},
-    {"date": "2021-04-14", "name": "Coinbase 纳斯达克上市", "category": "机构", "certainty": "历史", "price_context": "~$64.9k(前顶同日)", "significance": "加密行业合规化标志, 恰与 2021 双顶前一顶同日 — 机构牛市叙事重要节点。"},
-    {"date": "2021-05-21", "name": "中国挖矿禁令", "category": "基础设施", "certainty": "历史", "price_context": "~$37k / 9·24~$42k", "significance": "川渝新疆青海关停→9·24 全面禁止一切虚拟币活动; 全球算力单季骤降近半后西迁北美, 史上最大矿业去中国化。"},
-    {"date": "2021-09-07", "name": "萨尔瓦多 BTC 法币化", "category": "监管", "certainty": "历史", "price_context": "~$46k(当日闪崩$43k)", "significance": "全球首个将 BTC 定为法定货币的主权国家, 开启国家级采用叙事。"},
-    {"date": "2021-11-10", "name": "2021 周期顶(双顶)", "category": "市场", "certainty": "历史", "price_context": "ATH $69,044", "significance": "触及 $69,044 大顶(与 4·14 ~$64.9k 构成双顶), 机构牛市见顶, 转入 2022 深熊。"},
-    {"date": "2021-11-14", "name": "Taproot 激活", "category": "协议", "certainty": "历史", "price_context": "~$64k", "significance": "区块 709,632, SegWit 以来最大升级, 引入 Schnorr 签名与 MAST, 提升隐私/可扩展性, 标志协议层成熟。"}
+    {
+     "date": "2018-03",
+     "name": "闪电网络主网上线",
+     "category": "基础设施",
+     "certainty": "历史",
+     "price_context": "~$8,000-11,000",
+     "significance": "lnd/c-lightning/eclair 三实现主网 beta, SegWit 铺路后 BTC 二层支付扩容关键基础设施落地。"
+    },
+    {
+     "date": "2020-03-12",
+     "name": "新冠黑色星期四",
+     "category": "黑天鹅",
+     "certainty": "历史",
+     "price_context": "~$7,900→$3,800",
+     "significance": "全球流动性挤兑 BTC 单日腰斩, 衍生品/交易所脆弱性暴露 — 此深坑成为随后机构大牛的起点。"
+    },
+    {
+     "date": "2020-05-11",
+     "name": "第三次减半",
+     "category": "减半",
+     "certainty": "历史",
+     "price_context": "~$8,600",
+     "significance": "区块 630,000, 奖励 12.5→6.25 BTC, 为 2020-21 牛市奠定供给面。"
+    },
+    {
+     "date": "2020-08-11",
+     "name": "MicroStrategy 首次购入",
+     "category": "机构",
+     "certainty": "历史",
+     "price_context": "均价 $11,653",
+     "significance": "首家上市公司将 21,454 BTC 纳入资产负债表, 开创企业金库范式, Saylor 成机构叙事旗手。"
+    },
+    {
+     "date": "2021-02-08",
+     "name": "特斯拉买入 $15 亿",
+     "category": "机构",
+     "certainty": "历史",
+     "price_context": "~$38k→$44k",
+     "significance": "主流车企背书把机构 FOMO 推至高潮; 5 月又以能耗为由暂停支付, 凸显叙事反复。"
+    },
+    {
+     "date": "2021-04-14",
+     "name": "Coinbase 纳斯达克上市",
+     "category": "机构",
+     "certainty": "历史",
+     "price_context": "~$64.9k(前顶同日)",
+     "significance": "加密行业合规化标志, 恰与 2021 双顶前一顶同日 — 机构牛市叙事重要节点。"
+    },
+    {
+     "date": "2021-05-21",
+     "name": "中国挖矿禁令",
+     "category": "基础设施",
+     "certainty": "历史",
+     "price_context": "~$37k / 9·24~$42k",
+     "significance": "川渝新疆青海关停→9·24 全面禁止一切虚拟币活动; 全球算力单季骤降近半后西迁北美, 史上最大矿业去中国化。"
+    },
+    {
+     "date": "2021-09-07",
+     "name": "萨尔瓦多 BTC 法币化",
+     "category": "监管",
+     "certainty": "历史",
+     "price_context": "~$46k(当日闪崩$43k)",
+     "significance": "全球首个将 BTC 定为法定货币的主权国家, 开启国家级采用叙事。"
+    },
+    {
+     "date": "2021-11-10",
+     "name": "2021 周期顶(双顶)",
+     "category": "市场",
+     "certainty": "历史",
+     "price_context": "ATH $69,044",
+     "significance": "触及 $69,044 大顶(与 4·14 ~$64.9k 构成双顶), 机构牛市见顶, 转入 2022 深熊。"
+    },
+    {
+     "date": "2021-11-14",
+     "name": "Taproot 激活",
+     "category": "协议",
+     "certainty": "历史",
+     "price_context": "~$64k",
+     "significance": "区块 709,632, SegWit 以来最大升级, 引入 Schnorr 签名与 MAST, 提升隐私/可扩展性, 标志协议层成熟。"
+    }
    ]
   },
   {
    "era": "ETF 时代与主权化",
    "span": "2022-2026",
    "milestones": [
-    {"date": "2022-05-09", "name": "Terra/UST 算稳崩塌", "category": "黑天鹅", "certainty": "历史", "price_context": "~$3万→急跌", "significance": "算法稳定币 UST 脱锚归零, LFG 抛逾 8 万枚 BTC 储备砸盘, 引爆 3AC/Celsius 连环爆雷。"},
-    {"date": "2022-11-11", "name": "FTX 破产(周期大底)", "category": "黑天鹅", "certainty": "历史", "price_context": "大底 ~$1.6万", "significance": "第二大交易所挪用客户资金后破产, BTC 跌至本轮大底, 行业信任与杠杆彻底出清。"},
-    {"date": "2023-01-21", "name": "Ordinals 序数协议", "category": "协议", "certainty": "历史", "price_context": "~$2.2万", "significance": "催生铭文与 BRC-20, 复活比特币手续费市场并重塑区块空间叙事。"},
-    {"date": "2024-01-10", "name": "现货比特币 ETF 获批", "category": "机构", "certainty": "历史", "price_context": "~$4.6万", "significance": "SEC 一次性批准 11 只现货 ETF(次日交易), 打通机构合规入场; IBIT 创 ETF 史最快吸金纪录。"},
-    {"date": "2024-04-20", "name": "第四次减半 + Runes", "category": "减半", "certainty": "历史", "price_context": "~$6.4万", "significance": "区块 840,000, 补贴 6.25→3.125 BTC; 同一区块 Runes 上线把当日手续费推至历史峰值。"},
-    {"date": "2025-03-06", "name": "战略比特币储备行政令", "category": "监管", "certainty": "历史", "price_context": "~$8.5-9万", "significance": "特朗普签 EO 14233 设立'战略比特币储备', 以约 20 万枚罚没 BTC 为底仓且承诺永不出售 — 首次将 BTC 确立为国家级储备资产。"},
-    {"date": "2025-07-18", "name": "GENIUS 稳定币法案", "category": "监管", "certainty": "历史", "price_context": "~$12万", "significance": "美国首部联邦稳定币法律, 强制 100% 高流动性储备与月度披露, 强化美元链上主导。"}
+    {
+     "date": "2022-05-09",
+     "name": "Terra/UST 算稳崩塌",
+     "category": "黑天鹅",
+     "certainty": "历史",
+     "price_context": "~$3万→急跌",
+     "significance": "算法稳定币 UST 脱锚归零, LFG 抛逾 8 万枚 BTC 储备砸盘, 引爆 3AC/Celsius 连环爆雷。"
+    },
+    {
+     "date": "2022-11-11",
+     "name": "FTX 破产(周期大底)",
+     "category": "黑天鹅",
+     "certainty": "历史",
+     "price_context": "大底 ~$1.6万",
+     "significance": "第二大交易所挪用客户资金后破产, BTC 跌至本轮大底, 行业信任与杠杆彻底出清。"
+    },
+    {
+     "date": "2023-01-21",
+     "name": "Ordinals 序数协议",
+     "category": "协议",
+     "certainty": "历史",
+     "price_context": "~$2.2万",
+     "significance": "催生铭文与 BRC-20, 复活比特币手续费市场并重塑区块空间叙事。"
+    },
+    {
+     "date": "2024-01-10",
+     "name": "现货比特币 ETF 获批",
+     "category": "机构",
+     "certainty": "历史",
+     "price_context": "~$4.6万",
+     "significance": "SEC 一次性批准 11 只现货 ETF(次日交易), 打通机构合规入场; IBIT 创 ETF 史最快吸金纪录。"
+    },
+    {
+     "date": "2024-04-20",
+     "name": "第四次减半 + Runes",
+     "category": "减半",
+     "certainty": "历史",
+     "price_context": "~$6.4万",
+     "significance": "区块 840,000, 补贴 6.25→3.125 BTC; 同一区块 Runes 上线把当日手续费推至历史峰值。"
+    },
+    {
+     "date": "2025-03-06",
+     "name": "战略比特币储备行政令",
+     "category": "监管",
+     "certainty": "历史",
+     "price_context": "~$8.5-9万",
+     "significance": "特朗普签 EO 14233 设立'战略比特币储备', 以约 20 万枚罚没 BTC 为底仓且承诺永不出售 — 首次将 BTC 确立为国家级储备资产。"
+    },
+    {
+     "date": "2025-07-18",
+     "name": "GENIUS 稳定币法案",
+     "category": "监管",
+     "certainty": "历史",
+     "price_context": "~$12万",
+     "significance": "美国首部联邦稳定币法律, 强制 100% 高流动性储备与月度披露, 强化美元链上主导。"
+    }
    ]
   },
   {
    "era": "未来路线图",
    "span": "2026+",
    "milestones": [
-    {"date": "2026-02", "name": "BIP-360 后量子迁移(P2QRH)", "category": "协议", "certainty": "提案", "significance": "草案合入 BIP 仓库, 提出抗量子输出类型(ML-DSA 等 NIST 算法)+ BIP-361 分阶段落日旧签名。已有测试网实现, 但仍为 draft、共识与激活时间未定 — 绝非既定路线。"},
-    {"date": "2026", "name": "OP_CAT/契约(covenants)辩论", "category": "协议", "certainty": "提案", "significance": "BIP-347(OP_CAT)/CTV/OP_VAULT 等契约方案并行辩论; Taproot 后仍无软分叉进入激活阶段, 社区对激活方法论分歧未决。若激活将为 L1 智能合约/BitVM 开空间 — 当前纯提案。"},
-    {"date": "2028-04", "name": "第五次减半", "category": "减半", "certainty": "预定", "significance": "区块 1,050,000, 补贴 3.125→1.5625 BTC, 年增发率降至约 0.4%。区块高度已定为预定; 确切日历日随出块速度浮动, 现估 2028 年 4 月。"},
-    {"date": "2028-07-18", "name": "GENIUS 非合规稳定币退美时限", "category": "监管", "certainty": "预定", "significance": "稳定币法案生效满 3 年法定时限; 此后不得向美国用户提供非许可发行方的支付稳定币 — 重塑美元稳定币格局与 BTC 法币入金通道。"},
-    {"date": "2032", "name": "第六次减半", "category": "减半", "certainty": "预定", "significance": "区块 1,260,000, 补贴 1.5625→0.78125 BTC; 补贴占矿工收入比重进一步下降, 手续费重要性持续上升。日历日为估计。"},
-    {"date": "~2140", "name": "补贴归零 / 21M 供应上限", "category": "基础设施", "certainty": "预定", "significance": "约区块 693 万补贴按四年减半规则舍入至 0, 总量渐近 2,100 万枚封顶, 此后矿工收入全部来自手续费。上限硬编码由全节点强制。长期悬念: 手续费能否支撑安全预算, 是尚无定论的经济学问题。"}
+    {
+     "date": "2026-02",
+     "name": "BIP-360 后量子迁移(P2QRH)",
+     "category": "协议",
+     "certainty": "提案",
+     "significance": "草案合入 BIP 仓库, 提出抗量子输出类型(ML-DSA 等 NIST 算法)+ BIP-361 分阶段落日旧签名。已有测试网实现, 但仍为 draft、共识与激活时间未定 — 绝非既定路线。"
+    },
+    {
+     "date": "2026",
+     "name": "OP_CAT/契约(covenants)辩论",
+     "category": "协议",
+     "certainty": "提案",
+     "significance": "BIP-347(OP_CAT)/CTV/OP_VAULT 等契约方案并行辩论; Taproot 后仍无软分叉进入激活阶段, 社区对激活方法论分歧未决。若激活将为 L1 智能合约/BitVM 开空间 — 当前纯提案。"
+    },
+    {
+     "date": "2028-04",
+     "name": "第五次减半",
+     "category": "减半",
+     "certainty": "预定",
+     "significance": "区块 1,050,000, 补贴 3.125→1.5625 BTC, 年增发率降至约 0.4%。区块高度已定为预定; 确切日历日随出块速度浮动, 现估 2028 年 4 月。"
+    },
+    {
+     "date": "2028-07-18",
+     "name": "GENIUS 非合规稳定币退美时限",
+     "category": "监管",
+     "certainty": "预定",
+     "significance": "稳定币法案生效满 3 年法定时限; 此后不得向美国用户提供非许可发行方的支付稳定币 — 重塑美元稳定币格局与 BTC 法币入金通道。"
+    },
+    {
+     "date": "2032",
+     "name": "第六次减半",
+     "category": "减半",
+     "certainty": "预定",
+     "significance": "区块 1,260,000, 补贴 1.5625→0.78125 BTC; 补贴占矿工收入比重进一步下降, 手续费重要性持续上升。日历日为估计。"
+    },
+    {
+     "date": "~2140",
+     "name": "补贴归零 / 21M 供应上限",
+     "category": "基础设施",
+     "certainty": "预定",
+     "significance": "约区块 693 万补贴按四年减半规则舍入至 0, 总量渐近 2,100 万枚封顶, 此后矿工收入全部来自手续费。上限硬编码由全节点强制。长期悬念: 手续费能否支撑安全预算, 是尚无定论的经济学问题。"
+    }
    ]
   }
  ]

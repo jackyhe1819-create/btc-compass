@@ -405,15 +405,11 @@ def get_balanced_price_history(df: pd.DataFrame, days: int = 90) -> dict:
 
 def get_halving_cycle_history(days: int = 90) -> dict:
     """减半周期历史（月份数随时间推移）"""
-    HALVINGS = [
-        datetime(2012, 11, 28), datetime(2016, 7, 9),
-        datetime(2020, 5, 11), datetime(2024, 4, 20),
-    ]
     today = datetime.now()
     dates, values = [], []
     for i in range(days - 1, -1, -1):
         day = today - __import__('datetime').timedelta(days=i)
-        last_halving = max((h for h in HALVINGS if h <= day), default=HALVINGS[0])
+        last_halving = max((h for h in HALVING_DATES if h <= day), default=HALVING_DATES[0])
         months = (day - last_halving).days / 30.44
         dates.append(day.strftime('%Y-%m-%d'))
         values.append(round(months, 1))

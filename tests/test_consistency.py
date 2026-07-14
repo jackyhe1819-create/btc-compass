@@ -216,3 +216,51 @@ def test_member_weights_reference_real_members():
         for m, w in weights.items():
             assert m in members, f"「{bucket_name}」的成员权重引用不存在的因子「{m}」"
             assert w > 0
+
+
+# ────────────────────────────────────────────────────────────
+# 减半日期唯一事实源守卫 (2026-07 审查: 曾发现 8 份拷贝分裂成 04-19/04-20 两派)
+# ────────────────────────────────────────────────────────────
+
+def test_halving_dates_single_source():
+    """减半日期字面量只允许出现在 core.py — 其余 .py 一律 import。
+
+    守卫两种写法: datetime(2024, 4, 20) 与 "2024-04-20" 字符串。
+    JSON 资产不在守卫范围 (路线图里程碑正文里的历史日期是合法内容)。
+    """
+    # 用拼接构造字面量, 防止本文件自触发
+    halving_iso = ["2012" + "-11-28", "2016" + "-07-09", "2020" + "-05-11",
+                   "2024" + "-04-19", "2024" + "-04-20",
+                   "2028" + "-04-15", "2028" + "-04-20"]
+    halving_ctor = [r"datetime\(\s*2012\s*,\s*11\s*,\s*28",
+                    r"datetime\(\s*2016\s*,\s*7\s*,\s*9",
+                    r"datetime\(\s*2020\s*,\s*5\s*,\s*11",
+                    r"datetime\(\s*2024\s*,\s*4\s*,\s*(19|20)",
+                    r"datetime\(\s*2028\s*,\s*4\s*,"]
+    allowed = os.path.join("btc_web", "btc_dashboard", "core.py")
+
+    scan_dirs = [os.path.join(REPO_ROOT, "btc_web"),
+                 os.path.join(REPO_ROOT, "backtest")]
+    offenders = []
+    for root_dir in scan_dirs:
+        for dirpath, dirnames, filenames in os.walk(root_dir):
+            dirnames[:] = [d for d in dirnames
+                           if d not in ("__pycache__", "output", "cache", "data", ".venv")]
+            for fn in filenames:
+                if not fn.endswith(".py"):
+                    continue
+                path = os.path.join(dirpath, fn)
+                rel = os.path.relpath(path, REPO_ROOT)
+                if rel == allowed:
+                    continue
+                with open(path, "r", encoding="utf-8") as f:
+                    src = f.read()
+                for lit in halving_iso:
+                    if lit in src:
+                        offenders.append(f"{rel}: 字符串 {lit}")
+                for pat in halving_ctor:
+                    if re.search(pat, src):
+                        offenders.append(f"{rel}: 构造式 {pat}")
+    assert not offenders, (
+        "减半日期字面量出现在 core.py 之外 (应 from btc_dashboard.core import "
+        "HALVING_DATES/NEXT_HALVING_ESTIMATE):\n  " + "\n  ".join(offenders))

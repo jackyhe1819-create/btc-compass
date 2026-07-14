@@ -104,7 +104,7 @@ def _blackswan_block(b):
     if not b:
         return None
     return {
-        "title": "黑天鹅冲击画像 —— 无法预测, 但有风险规律",
+        "title": "黑天鹅冲击复盘 —— 无法预测, 仅事后风险画像",
         "events": [{"name": e["name"], "date": e["date"], "kind": e["kind"],
                     "cycle_month": e["cycle_month"],
                     "acute_dd": e["acute_dd_pct"], "dd_from_high": e["dd_from_30d_high_pct"],
@@ -112,9 +112,11 @@ def _blackswan_block(b):
                     "fwd90": e["fwd90"], "fwd365": e["fwd365"], "since": e.get("since")}
                    for e in b["events"]],
         "summary": b["summary"],
-        "verdict": ("急跌中位 -16% (相对前30日高点 -33%)、见底快, 但收复时间 1~534 天"
-                    "完全由减半周期相位决定; 加密内生黑天鹅扎堆熊市 (反身性); "
-                    "外部危机 (银行/宏观) BTC 反成避风港 (硅谷银行后 90天 +30%)。"),
+        "verdict": ("急跌中位 -16% (相对前30日高点 -33%)、见底快, 收复时间 1~534 天悬殊、"
+                    "与减半周期相位强相关 (n=11, 非定律); 加密内生黑天鹅扎堆熊市 (反身性); "
+                    "外部危机时 BTC 也可能成避风港 (硅谷银行后 90天 +30%, 仅 n=1)。"
+                    "注意: 样本为事后追认的知名暴跌 (选样偏差), 且 BTC 存活至今才谈得上"
+                    "'收复' (幸存者偏差) — 中位数不构成未来下界。"),
     }
 
 
@@ -124,6 +126,7 @@ def _forward_risk_block(fr):
         return None
     return {
         "title": "前瞻风险雷达 —— 未来可能的 (判断, 非回测)",
+        "generated": fr.get("generated"),
         "near_term_focus": fr.get("near_term_focus"),
         "gray_rhino": fr.get("gray_rhino", []),
         "black_swan": fr.get("black_swan", []),
@@ -148,9 +151,9 @@ def get_market_patterns():
     if not any(blocks.values()):
         return None
     return {
-        "generated": (f or s or b or {}).get("generated"),
+        "generated": (f or s or b or fr or {}).get("generated"),
         "honest_note": ("全部经三视角对抗核实。证伪类: 民间规律不显著; 黑天鹅: n=1 无规律"
-                        "仅风险画像。唯一真实可量化的重复规律是减半周期本身 (见上方周期相位卡)。"
-                        "均为周期叙事/风险参考, 非交易信号。"),
+                        "仅事后画像 (事后追认选样)。减半周期是唯一候选的重复结构, 但同样 "
+                        "n=3~4 无统计显著性 (见上方周期相位卡)。均为周期叙事/风险参考, 非交易信号。"),
         **blocks,
     }

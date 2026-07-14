@@ -27,13 +27,17 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# 减半日期与现网同源 (core.py 唯一事实源), 照 factors.py 先例
+_BTC_WEB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "btc_web")
+sys.path.insert(0, _BTC_WEB)
+from btc_dashboard.core import HALVING_DATES, NEXT_HALVING_ESTIMATE  # noqa: E402
+
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 DATA_OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "btc_web", "btc_dashboard", "data")
 
-HALVINGS = [pd.Timestamp(d) for d in
-            ("2012-11-28", "2016-07-09", "2020-05-11", "2024-04-19")]
-NEXT_HALVING_EST = pd.Timestamp("2028-04-15")   # 按出块速率估算, 前端动态展示倒计时
+HALVINGS = [pd.Timestamp(d) for d in HALVING_DATES]
+NEXT_HALVING_EST = pd.Timestamp(NEXT_HALVING_ESTIMATE)   # 前端动态展示倒计时
 
 WORLD_CUPS = [  # (开幕日, 届)
     (pd.Timestamp("2014-06-12"), "2014 巴西"),
@@ -176,26 +180,11 @@ def main():
                               "'大选年牛市'≡'减半年牛市', 同一周期的两个名字。")},
     }
 
-    current = {
-        "as_of": now.strftime("%Y-%m-%d"),
-        "cycle_no": cur_cyc,
-        "months_since_halving": round(cur_m, 1),
-        "days_to_next_halving_est": int((NEXT_HALVING_EST - now).days),
-        "active_windows": [],
-    }
-    # 当前活跃事件窗口
-    if pd.Timestamp("2026-06-11") <= now <= pd.Timestamp("2026-07-19"):
-        current["active_windows"].append("2026 世界杯进行中 (6-11 → 7-19)")
-    _chair_days = (now - pd.Timestamp("2026-05-22")).days
-    if 0 <= _chair_days <= 365:
-        current["active_windows"].append(
-            f"联储换届后第 {_chair_days} 天 (沃什 2026-05-22 就任)")
-
+    # current 块由 cycle_events.py 每次请求现算 (减半常量同源 core.py), 资产内不再烘焙
     asset = {
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "honest_note": ("事件样本 n=3~4, 无统计显著性可言; 逐次列出+混杂标注, "
                         "周期叙事参考, 非交易信号。数据: CoinMetrics/现网价格序列。"),
-        "current": current,
         "cycle_phases": phases,
         "events": {
             "世界杯": {"rows": wc, **confound["世界杯"]},
@@ -220,8 +209,7 @@ def main():
 
     md = [f"# 历史大事件规律量化 (生成 {asset['generated']})", "",
           f"**当前位置**: 第 {cur_cyc} 周期, 减半后 {cur_m:.1f} 月; "
-          f"距下次减半(估) {current['days_to_next_halving_est']} 天; "
-          f"活跃窗口: {'; '.join(current['active_windows']) or '无'}", "",
+          f"距下次减半(估) {int((NEXT_HALVING_EST - now).days)} 天", "",
           f"⚠️ {asset['honest_note']}", "",
           "## 减半周期相位地图 (逐周期, 不平均)", ""]
     for ph in phases:

@@ -1,16 +1,6 @@
 {
  "generated": "2026-07-11 16:57",
  "honest_note": "事件样本 n=3~4, 无统计显著性可言; 逐次列出+混杂标注, 周期叙事参考, 非交易信号。数据: CoinMetrics/现网价格序列。",
- "current": {
-  "as_of": "2026-07-11",
-  "cycle_no": 4,
-  "months_since_halving": 26.7,
-  "days_to_next_halving_est": 644,
-  "active_windows": [
-   "2026 世界杯进行中 (6-11 → 7-19)",
-   "联储换届后第 50 天 (沃什 2026-05-22 就任)"
-  ]
- },
  "cycle_phases": [
   {
    "phase": "减半后 0-12 月 (历史主升段)",
