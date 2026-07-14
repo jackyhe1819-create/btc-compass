@@ -99,19 +99,25 @@ def risk_neutral_density(chain: List[dict], spot: float,
             iv_by_K.setdefault(K, iv)
     if len(iv_by_K) < 5:
         return None
+    Ks = sorted(iv_by_K)
+    if (Ks[-1] - Ks[0]) < 0.2 * spot:
+        return None   # 行权价跨度 < ±10%: wing 全靠外推, 分布不可信
     F = _forward_from_parity(chain, spot, exp)
     T = (exp - now).total_seconds() / (365.25 * 86400)
-    Ks = sorted(iv_by_K)
     try:
         sigma = fit_smile(Ks, [iv_by_K[k] for k in Ks], F)
         grid = np.linspace(Ks[0], Ks[-1], _GRID_N)
         C = np.array([_black76_call(F, float(K), T, sigma(float(K))) for K in grid])
         dK = grid[1] - grid[0]
+        raw = (C[2:] - 2 * C[1:-1] + C[:-2]) / (dK * dK)
         pdf = np.zeros(_GRID_N)
-        pdf[1:-1] = np.maximum((C[2:] - 2 * C[1:-1] + C[:-2]) / (dK * dK), 0.0)
+        pdf[1:-1] = np.maximum(raw, 0.0)
+        neg_mass = -float(np.sum(raw[raw < 0])) * dK
         area = _trapz(pdf, grid)
         if not (area > 0) or not np.isfinite(area):
             return None
+        if neg_mass / (area + neg_mass) > 0.05:
+            return None   # butterfly-arbitrage 负质量 >5%: smile 拟合已失真, 宁缺毋滥(clip 摊回=掩耳盗铃)
         pdf = pdf / area
     except Exception:
         return None

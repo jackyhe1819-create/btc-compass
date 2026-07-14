@@ -151,3 +151,23 @@ def test_quantile_interpolation_not_staircase():
     r = risk_neutral_density(_synth_chain(), 60000, now)
     assert r is not None
     assert abs(_pgt_at(r, r["median"]) - 50.0) <= 0.5
+
+
+def test_rnd_none_when_strike_span_too_narrow():
+    # 行权价挤在 ±3% 内: wing 全靠多项式外推, 分布不可信 → None(面板 partial)
+    now = datetime.datetime(2026, 7, 13, tzinfo=UTC)
+    strikes = [58000, 59000, 60000, 61000, 62000]          # 跨度 4k < 0.2×60000
+    chain = [{"instrument_name": f"BTC-31JUL26-{k}-C",
+              "mark_iv": 60.0, "underlying_price": 60000} for k in strikes]
+    assert risk_neutral_density(chain, 60000, now) is None
+
+
+def test_rnd_none_when_negative_mass_excessive():
+    # 剧烈锯齿 smile → 多项式拟合振荡 → C(K) 非凸 → BL 二阶导大片为负;
+    # clip 后无声摊回是掩耳盗铃, >5% 负质量应降级 None
+    now = datetime.datetime(2026, 7, 13, tzinfo=UTC)
+    strikes = list(range(40000, 90001, 5000))
+    ivs = {k: (2.5 if i % 2 == 0 else 0.3) for i, k in enumerate(strikes)}   # 极端锯齿
+    chain = [{"instrument_name": f"BTC-31JUL26-{k}-C",
+              "mark_iv": ivs[k] * 100, "underlying_price": 60000} for k in strikes]
+    assert risk_neutral_density(chain, 60000, now) is None
