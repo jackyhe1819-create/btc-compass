@@ -20,6 +20,13 @@ accepted_gap 并写明理由 —— 没有"静默无守护"的不变量。
 
 INVARIANT_INVENTORY = [
     # ── 本循环新增守护 ──
+    {"name": "期权卡脚注 IC 数字/方向/计分声明 ↔ options_study.json 落盘值",
+     "places": ["btc_web/static/script.js(opt-foot, 'DVOL 分位回测')",
+                "backtest/output/options_study.json"],
+     "guard": "test_footnote_sync::test_options_footnote_ic_matches_study",
+     "status": "guarded",
+     "note": "脚注是全站唯一主动声明回测结论的文案; 重跑回测后数字/方向/verdict "
+             "漂移会把诚实标注变成谎言(复审 Y16)。"},
     {"name": "桶成员名 ↔ runner 产出键 契约",
      "places": ["btc_web/btc_dashboard/scoring.py:34-92",
                 "btc_web/btc_dashboard/runner.py:307-362"],
