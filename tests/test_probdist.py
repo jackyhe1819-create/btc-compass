@@ -171,3 +171,21 @@ def test_rnd_none_when_negative_mass_excessive():
     chain = [{"instrument_name": f"BTC-31JUL26-{k}-C",
               "mark_iv": ivs[k] * 100, "underlying_price": 60000} for k in strikes]
     assert risk_neutral_density(chain, 60000, now) is None
+
+
+def test_rnd_flat_smile_matches_lognormal_analytics():
+    # 平坦 smile ⇒ RND 应为 lognormal(F, σ√T): median=F·e^{-σ²T/2}, mean≈F, p_up=Φ(-σ√T/2)。
+    # σ 错 √2 倍、σ²T/2 漂移符号写反、分位查表整体偏移都会在此现形(旧 ±10% 宽带断言全放行)。
+    now = datetime.datetime(2026, 7, 13, tzinfo=UTC)
+    F, sig = 60000.0, 0.60
+    r = risk_neutral_density(_synth_chain(F=int(F)), int(F), now)
+    assert r is not None
+    exp = datetime.datetime(2026, 7, 31, 8, tzinfo=UTC)          # 31JUL26 08:00 UTC 到期口径
+    T = (exp - now).total_seconds() / (365.25 * 86400)
+    dK = (90000 - 40000) / 399                                   # 合成链网格步长 ≈ $125
+    median_theory = F * math.exp(-sig * sig * T / 2)
+    mean_theory = F                                              # 鞅性(截断 ±3σ 外, 误差可忽略)
+    p_up_theory = _ncdf(-sig * math.sqrt(T) / 2) * 100           # P(S>F), 合成链 parity 退回 F=spot
+    assert abs(r["median"] - median_theory) <= 2 * dK
+    assert abs(r["mean"] - mean_theory) <= 2 * dK
+    assert abs(r["p_up"] - p_up_theory) <= 1.0                   # 1pp

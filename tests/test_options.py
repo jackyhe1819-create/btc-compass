@@ -258,3 +258,36 @@ def test_backfill_dvol_idempotent(tmp_path, monkeypatch):
     n2 = backfill.backfill_dvol(str(tmp_path))
     assert n1 == 2
     assert n2 == 0  # 二次无新点
+
+
+def _chain_with_wings():
+    # skew_exp = _nearest_exp(≥20d) 会选中 14AUG26(now=07-12 时 ~33 天);
+    # 翼带按 spot=64000: put 翼 [54400,60800], call 翼 [67200,73600]
+    return [
+        {"instrument_name": "BTC-14AUG26-64000-C", "mark_iv": 33.0, "open_interest": 10, "underlying_price": 64000},
+        {"instrument_name": "BTC-14AUG26-56000-P", "mark_iv": 40.0, "open_interest": 10, "underlying_price": 64000},
+        {"instrument_name": "BTC-14AUG26-60000-P", "mark_iv": 38.0, "open_interest": 10, "underlying_price": 64000},
+        {"instrument_name": "BTC-14AUG26-68000-C", "mark_iv": 30.0, "open_interest": 10, "underlying_price": 64000},
+        {"instrument_name": "BTC-14AUG26-72000-C", "mark_iv": 32.0, "open_interest": 10, "underlying_price": 64000},
+    ]
+
+
+def test_skew_wing_numeric():
+    # put 翼 avg(40,38)=39.0, call 翼 avg(30,32)=31.0 → skew_wing = +8.0(正=看跌溢价)
+    # 旧 fixture 的 skew_exp 落在无翼合约的 25DEC26, skew 计算路径从未被执行过 — 本 fixture 补上
+    now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    m = derive_snapshot(_chain_with_wings(), 64000.0, now)
+    assert m["skew_wing"] == 8.0
+
+
+def test_max_pain_numeric():
+    # 手算: K=50000→payout 200k; K=60000→50k+50k=100k(最小); K=70000→200k → 痛点 60000
+    now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    chain = [
+        {"instrument_name": "BTC-14AUG26-50000-C", "mark_iv": 35.0, "open_interest": 5,  "underlying_price": 64000},
+        {"instrument_name": "BTC-14AUG26-60000-C", "mark_iv": 33.0, "open_interest": 10, "underlying_price": 64000},
+        {"instrument_name": "BTC-14AUG26-60000-P", "mark_iv": 34.0, "open_interest": 10, "underlying_price": 64000},
+        {"instrument_name": "BTC-14AUG26-70000-P", "mark_iv": 36.0, "open_interest": 5,  "underlying_price": 64000},
+    ]
+    m = derive_snapshot(chain, 64000.0, now)
+    assert m["max_pain"] == 60000
