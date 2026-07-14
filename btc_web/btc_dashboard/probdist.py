@@ -154,6 +154,52 @@ _UA = "Mozilla/5.0 (compatible; btc-compass/1.0)"
 _poly_cache = {"data": None, "ts": 0.0}
 _POLY_TTL = 1800
 
+_KALSHI_URL = ("https://api.elections.kalshi.com/trade-api/v2/markets"
+               "?series_ticker=KXBTCY&status=open&limit=100")
+_kalshi_cache = {"data": None, "ts": 0.0}
+_KALSHI_TTL = 1800
+
+
+def _kalshi_get() -> list:
+    req = urllib.request.Request(_KALSHI_URL, headers={"User-Agent": _UA})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        d = _json.load(r)
+    return d.get("markets", []) if isinstance(d, dict) else []
+
+
+def fetch_kalshi_btc() -> Optional[dict]:
+    """Kalshi BTC 年底价格分布(KXBTCY 系列, 行情免鉴权)。尽力而为: 失败/桶太少 → None。
+    价格是真实世界众筹概率(P 测度), 与 RND(Q 测度)不可比差; PMF 含 vig(实测≈1.03)按和归一。"""
+    now = time.time()
+    if _kalshi_cache["data"] is not None and now - _kalshi_cache["ts"] < _KALSHI_TTL:
+        return _kalshi_cache["data"]
+    try:
+        buckets, total_vol, close = [], 0.0, None
+        for m in _kalshi_get():
+            try:
+                p = float(m.get("last_price_dollars") or 0)
+                lo = m.get("floor_strike")
+                hi = m.get("cap_strike")
+                buckets.append({"lo": (round(lo) if lo is not None else None),
+                                "hi": (round(hi) if hi is not None else None),
+                                "p": p})
+                total_vol += float(m.get("volume_fp") or 0)
+                close = close or (m.get("close_time") or "")[:10]
+            except Exception:
+                continue
+        s = sum(b["p"] for b in buckets)
+        if len(buckets) < 10 or s <= 0.5:
+            return None                       # 桶太少/市场休眠: 不足以构成分布
+        for b in buckets:
+            b["p"] = round(b["p"] / s * 100, 1)
+        buckets.sort(key=lambda b: b["lo"] if b["lo"] is not None else -1)
+        out = {"close": close, "buckets": buckets,
+               "volume": round(total_vol), "vig_pct": round((s - 1) * 100, 1)}
+        _kalshi_cache.update(data=out, ts=now)
+        return out
+    except Exception:
+        return None
+
 
 def _poly_get() -> list:
     req = urllib.request.Request(_POLY_URL, headers={"User-Agent": _UA})
@@ -212,7 +258,8 @@ def _assemble_probdist() -> dict:
         partial = True
         rnd = {k: None for k in _RND_KEYS}
     poly = fetch_polymarket_btc()
-    return {**rnd, "polymarket": poly, "updated_at": now.strftime("%H:%M"), "partial": partial}
+    return {**rnd, "polymarket": poly, "kalshi": fetch_kalshi_btc(),
+            "updated_at": now.strftime("%H:%M"), "partial": partial}
 
 
 def fetch_probdist_panel() -> dict:

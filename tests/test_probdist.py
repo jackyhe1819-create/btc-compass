@@ -102,6 +102,7 @@ def test_assemble_panel(monkeypatch):
     monkeypatch.setattr(pd_, "_now", lambda: now)
     monkeypatch.setattr(pd_, "_fetch_chain", lambda: (_synth_chain(), 60000.0))
     monkeypatch.setattr(pd_, "fetch_polymarket_btc", lambda: [{"q":"x","yes":18.0,"end":"2026-12-31"}])
+    monkeypatch.setattr(pd_, "fetch_kalshi_btc", lambda: None)   # 隔离真网络
     p = pd_._assemble_probdist()
     assert p["partial"] is False and p["median"] is not None and len(p["polymarket"]) == 1
 
@@ -111,6 +112,7 @@ def test_assemble_panel_rnd_fail_partial(monkeypatch):
     def boom(): raise RuntimeError("deribit down")
     monkeypatch.setattr(pd_, "_fetch_chain", boom)
     monkeypatch.setattr(pd_, "fetch_polymarket_btc", lambda: [])
+    monkeypatch.setattr(pd_, "fetch_kalshi_btc", lambda: None)   # 隔离真网络
     p = pd_._assemble_probdist()
     assert p["partial"] is True and "median" in p and p["median"] is None
 
@@ -189,3 +191,51 @@ def test_rnd_flat_smile_matches_lognormal_analytics():
     assert abs(r["median"] - median_theory) <= 2 * dK
     assert abs(r["mean"] - mean_theory) <= 2 * dK
     assert abs(r["p_up"] - p_up_theory) <= 1.0                   # 1pp
+
+
+def _kalshi_sample():
+    # 三种桶型各一(live 实测字段名), 价格和 0.60(避开 s<=0.5 休眠门槛边界)
+    return [
+        {"strike_type": "less", "cap_strike": 20000, "last_price_dollars": "0.02",
+         "volume_fp": "1000.5", "close_time": "2027-01-01T05:00:00Z"},
+        {"strike_type": "between", "floor_strike": 60000, "cap_strike": 64999.99,
+         "last_price_dollars": "0.20", "volume_fp": "2000", "close_time": "2027-01-01T05:00:00Z"},
+        {"strike_type": "greater", "floor_strike": 149999.99, "last_price_dollars": "0.38",
+         "volume_fp": "500", "close_time": "2027-01-01T05:00:00Z"},
+    ] + [
+        {"strike_type": "between", "floor_strike": 20000 + i * 5000, "cap_strike": 24999.99 + i * 5000,
+         "last_price_dollars": "0.0", "volume_fp": "0", "close_time": "2027-01-01T05:00:00Z"}
+        for i in range(8)   # 凑满 ≥10 桶的门槛
+    ]
+
+
+def test_kalshi_parse_normalize_sort(monkeypatch):
+    pd_._kalshi_cache["data"] = None; pd_._kalshi_cache["ts"] = 0.0
+    monkeypatch.setattr(pd_, "_kalshi_get", _kalshi_sample)
+    k = pd_.fetch_kalshi_btc()
+    assert k is not None
+    assert k["close"] == "2027-01-01"
+    assert abs(sum(b["p"] for b in k["buckets"]) - 100.0) < 0.5     # 归一化(vig 摊平)
+    assert k["buckets"][0]["lo"] is None                            # less 桶排最前
+    assert k["buckets"][-1]["hi"] is None                           # greater 桶排最后
+    assert k["buckets"][-1]["lo"] == 150000                         # 149999.99 → round
+    assert k["volume"] in (3500, 3501)                              # round(1000.5+2000+500)
+    assert k["vig_pct"] == round((0.60 - 1) * 100, 1)               # 样例和<1 为负; 实盘≈+3.3
+
+
+def test_kalshi_failure_returns_none(monkeypatch):
+    pd_._kalshi_cache["data"] = None; pd_._kalshi_cache["ts"] = 0.0
+    def boom(): raise RuntimeError("403")
+    monkeypatch.setattr(pd_, "_kalshi_get", boom)
+    assert pd_.fetch_kalshi_btc() is None
+
+
+def test_assemble_panel_includes_kalshi(monkeypatch):
+    now = datetime.datetime(2026, 7, 13, tzinfo=UTC)
+    monkeypatch.setattr(pd_, "_now", lambda: now)
+    monkeypatch.setattr(pd_, "_fetch_chain", lambda: (_synth_chain(), 60000.0))
+    monkeypatch.setattr(pd_, "fetch_polymarket_btc", lambda: [])
+    monkeypatch.setattr(pd_, "fetch_kalshi_btc", lambda: {"close": "2027-01-01", "buckets": [], "volume": 1, "vig_pct": 3.3})
+    p = pd_._assemble_probdist()
+    assert p["kalshi"]["close"] == "2027-01-01"
+    assert p["partial"] is False          # kalshi 尽力而为, 不影响 partial
