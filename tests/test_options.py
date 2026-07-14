@@ -291,3 +291,17 @@ def test_max_pain_numeric():
     ]
     m = derive_snapshot(chain, 64000.0, now)
     assert m["max_pain"] == 60000
+
+
+def test_max_pain_uses_oi_max_expiry():
+    # 同页两个痛点到期规则曾不同(期权卡复用 skew 的 ≥20d 最近到期, 旧指标表用 OI 主力)
+    # — 统一为 OI 主力(市场惯例), 本用例: 远月(旧实现会选)OI 极小, 近月才是主力
+    now = datetime.datetime(2026, 7, 12, tzinfo=UTC)
+    chain = [
+        {"instrument_name": "BTC-24JUL26-60000-C", "mark_iv": 33.0, "open_interest": 20, "underlying_price": 64000},
+        {"instrument_name": "BTC-24JUL26-60000-P", "mark_iv": 34.0, "open_interest": 10, "underlying_price": 64000},
+        {"instrument_name": "BTC-25DEC26-80000-C", "mark_iv": 40.0, "open_interest": 1,  "underlying_price": 64000},
+        {"instrument_name": "BTC-25DEC26-80000-P", "mark_iv": 41.0, "open_interest": 1,  "underlying_price": 64000},
+    ]
+    m = derive_snapshot(chain, 64000.0, now)
+    assert m["max_pain_exp"] == "24Jul26"    # OI 主力, 而非 ≥20d 的 25Dec26

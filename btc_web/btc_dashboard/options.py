@@ -69,7 +69,8 @@ def derive_snapshot(chain: List[dict], spot: float, now: datetime.datetime) -> D
     front = _nearest_exp(exps, now, 5)
     back = _nearest_exp(exps, now, 80)
     skew_exp = _nearest_exp(exps, now, 20) or front
-    mp_exp = skew_exp
+    # 痛点按 OI 主力到期(与旧指标表 indicators_aux.top_expiry 惯例统一, 消除同页双痛点矛盾)
+    mp_exp = max(exps, key=lambda e: sum(r["oi"] for r in rows if r["exp"] == e)) if exps else None
     atm_front = _atm_iv(rows, front, spot)
     atm_back = _atm_iv(rows, back, spot)
     put_wing = _wing_iv(rows, skew_exp, spot, 0.85, 0.95, "P")
@@ -212,7 +213,7 @@ def _assemble_panel() -> Dict:
            "dvol_now": round(dvol_now, 1) if dvol_now else None,
            "dvol_pct": dvol_pct, "dvol_window_days": n, "spark": spark,
            "spark_full": spark_full, "spark_full_start": spark_full_start,
-           "updated_at": now.strftime("%H:%M"), "partial": partial}
+           "updated_at": now.strftime("%H:%M UTC"), "partial": partial}
     out.update(snap)
     return out
 

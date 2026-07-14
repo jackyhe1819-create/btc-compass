@@ -259,7 +259,7 @@ def _assemble_probdist() -> dict:
         rnd = {k: None for k in _RND_KEYS}
     poly = fetch_polymarket_btc()
     return {**rnd, "polymarket": poly, "kalshi": fetch_kalshi_btc(),
-            "updated_at": now.strftime("%H:%M"), "partial": partial}
+            "updated_at": now.strftime("%H:%M UTC"), "partial": partial}
 
 
 def fetch_probdist_panel() -> dict:
