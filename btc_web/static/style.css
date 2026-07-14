@@ -3116,9 +3116,11 @@ body::before {
 .prob-stats { display:flex; gap:16px; flex-wrap:wrap; margin:6px 0 8px; }
 .prob-lbl { font-size:0.72rem; color:var(--text-secondary); }
 .prob-val { font-size:1.15rem; font-weight:600; color:var(--text-primary); }
-.prob-svg { display:block; margin:4px 0; }
+.prob-svg { display:block; margin:4px 0; height:auto; }
 .prob-chips { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
 .prob-chip { background:var(--bg-glass,rgba(255,255,255,0.03)); border-radius:8px; padding:4px 10px; font-size:0.75rem; color:var(--text-primary); }
 .prob-poly { background:color-mix(in srgb, var(--accent-btc) 12%, transparent); color:var(--accent-btc); border-radius:8px; padding:4px 10px; font-size:0.75rem; }
 .prob-muted { font-size:0.72rem; color:var(--text-muted); }
 .prob-foot { font-size:0.68rem; color:var(--text-muted); margin-top:10px; border-top:1px solid var(--border-color,#333); padding-top:6px; line-height:1.55; }
+.prob-kalshi-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-top:12px; }
+.prob-kalshi { margin-top:2px; }
