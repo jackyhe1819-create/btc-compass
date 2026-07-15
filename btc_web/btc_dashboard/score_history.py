@@ -14,7 +14,7 @@ import json
 import tempfile
 import threading
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 _HISTORY_FILE = "score_history.json"
@@ -196,6 +196,57 @@ def _compute_changes(prev: Optional[dict], curr: dict) -> dict:
     return result
 
 
+# 多尺度评分变化: (键, 回看天数, 应用哪个分数字段)
+# 周期分是慢变量 → 月/季/年; 战术分是快变量 → 周/月 (年尺度对它无意义)
+_TREND_HORIZONS = {
+    "cycle":    (("d30", 30), ("d90", 90), ("d365", 365)),
+    "tactical": (("d7", 7), ("d30", 30)),
+}
+# 基准条目允许比目标日期早的最大天数: 回填连续日序列下通常精确命中;
+# 缺口超过容忍则该档如实为 None, 不拿更老的数据冒充 (伪时间轴教训)
+_TREND_TOLERANCE_DAYS = 10
+
+
+def compute_trends(entries: list, today: Optional[str] = None) -> dict:
+    """
+    月/季/年尺度的评分变化 Δ = 最新分 - N天前基准分。
+    基准 = 日期 ≤ (最新日-N天) 的最近条目, 且不早于容忍窗口; 深度不足该档为 None。
+    返回 {"cycle": {"d30": {...}|None, ...}, "tactical": {...}, "depth_days": N}
+    """
+    out = {"cycle": {}, "tactical": {}, "depth_days": len(entries)}
+    for kind, horizons in _TREND_HORIZONS.items():
+        for key, _n in horizons:
+            out[kind][key] = None
+    if not entries:
+        return out
+
+    field = {"cycle": "total_score", "tactical": "tactical_score"}
+    curr = entries[-1]
+    try:
+        cur_date = datetime.strptime(today or curr["date"], "%Y-%m-%d")
+    except (KeyError, ValueError):
+        return out
+
+    for kind, horizons in _TREND_HORIZONS.items():
+        cur_v = curr.get(field[kind])
+        if cur_v is None:
+            continue
+        for key, n in horizons:
+            target = (cur_date - timedelta(days=n)).strftime("%Y-%m-%d")
+            floor = (cur_date - timedelta(days=n + _TREND_TOLERANCE_DAYS)).strftime("%Y-%m-%d")
+            base = next((e for e in reversed(entries)
+                         if e.get("date") and floor <= e["date"] <= target
+                         and e.get(field[kind]) is not None), None)
+            if base is None:
+                continue  # 深度不足/缺口过大 → 保持 None, 不伪造
+            out[kind][key] = {
+                "delta": round(float(cur_v) - float(base[field[kind]]), 4),
+                "base": base[field[kind]],
+                "base_date": base["date"],
+            }
+    return out
+
+
 def get_score_history(cache_dir: str, days: int = 90) -> dict:
     """
     返回评分历史时序 + 今日信号变化。
@@ -207,7 +258,8 @@ def get_score_history(cache_dir: str, days: int = 90) -> dict:
     """
     entries = _load_history(cache_dir)
     if not entries:
-        return {"series": [], "changes": {"prev_date": None, "total": None, "indicators": []}, "total_days": 0}
+        return {"series": [], "changes": {"prev_date": None, "total": None, "indicators": []},
+                "total_days": 0, "trends": compute_trends([])}
 
     series = [
         {
@@ -225,4 +277,5 @@ def get_score_history(cache_dir: str, days: int = 90) -> dict:
     prev = next((e for e in reversed(entries[:-1]) if e.get("date") != curr.get("date")), None)
     changes = _compute_changes(prev, curr)
 
-    return {"series": series, "changes": changes, "total_days": len(entries)}
+    return {"series": series, "changes": changes, "total_days": len(entries),
+            "trends": compute_trends(entries)}

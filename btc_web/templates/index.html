@@ -431,11 +431,18 @@
                         <button class="dtab" data-shdays="30">30天</button>
                         <button class="dtab active" data-shdays="90">90天</button>
                         <button class="dtab" data-shdays="180">180天</button>
+                        <button class="dtab" data-shdays="365">1年</button>
                     </div>
                 </div>
+                <!-- 月/季/年尺度评分变化 (来自 /api/score-history trends; 深度不足如实显示"历史不足") -->
+                <div id="scoreTrendChips" style="font-size:0.78rem; color:var(--text-muted); margin:-4px 0 8px 2px;"></div>
                 <div style="position:relative; height:240px;">
                     <canvas id="scoreHistoryChart"></canvas>
                 </div>
+                <p id="scoreHistoryCoverageNote" style="display:none; color:var(--text-muted); font-size:0.72rem; margin:6px 2px 0;">
+                    ⚠️ 长视图口径: 周期分全段因子覆盖率 100%; 战术分在约 3 个月前的回填段覆盖率 ~65%
+                    (资金费率无公开长史, 杠杆温度桶缺席重归一), 早期战术曲线纵向可比性有限。
+                </p>
                 <p id="scoreHistoryEmpty" style="display:none; color:#888; font-size:0.85rem; text-align:center; padding:30px 0;">
                     📭 历史数据从今天开始累积，每天刷新后自动记录一条快照
                 </p>

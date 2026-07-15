@@ -44,8 +44,10 @@ _SRC_TTL = 7 * 24 * 3600   # 数据源磁盘缓存 7 天
 # marker 带版本号: 回填口径修复后 bump 版本, 旧版本回填的条目被判定为污染数据,
 # 下次启动自动清除并按新口径重建 (真实快照永远保留)。
 # v2 (2026-07-10 对抗性审查修复): Pi Cycle 旧编码 / ETF 日期键 / MVRV-Z·NUPL·Puell 分位混合口径
-_MARKER = "score_history_backfilled.v2.marker"
-_OLD_MARKERS = ("score_history_backfilled.marker",)
+# v3 (2026-07-15): 回填窗口 90→365 天 — 喂满 decision.REPLAY_DAYS=365 的滞回重放窗口,
+#   并支撑月/年尺度评分变化展示; 算力拉长至 2y、资金费率翻页至 ~1y 配套
+_MARKER = "score_history_backfilled.v3.marker"
+_OLD_MARKERS = ("score_history_backfilled.marker", "score_history_backfilled.v2.marker")
 
 
 # ============================================================
@@ -191,9 +193,11 @@ def _fetch_etf_daily():
     return out or None
 
 
-def _fetch_hashrate_1y():
-    """mempool.space 一年日度算力 → [(date, hashrate)]"""
-    r = requests.get("https://mempool.space/api/v1/mining/hashrate/1y",
+def _fetch_hashrate_2y():
+    """mempool.space 两年日度算力 → [(date, hashrate)]。
+    2y 而非 1y: 365 天回填的最早日期也要有 SMA60 (需 ~425 天), 1y 会让
+    早期段 Hash Ribbons 整段缺席。"""
+    r = requests.get("https://mempool.space/api/v1/mining/hashrate/2y",
                      timeout=20, headers=_HEADERS)
     if r.status_code != 200:
         return None
@@ -205,10 +209,11 @@ def _fetch_hashrate_1y():
 
 
 def _fetch_funding_history():
-    """OKX 资金费率历史 (3 页 ≈ 100 天) → {date: [rates]}"""
+    """OKX 资金费率历史 (12 页 ≈ 400 天) → {date: [rates]}。
+    页数按 365 天回填配套; 更早日期该因子缺席、桶内重归一 (覆盖率戳如实记录)。"""
     out = {}
     after = None
-    for _ in range(3):
+    for _ in range(12):
         params = {"instId": "BTC-USDT-SWAP", "limit": "100"}
         if after:
             params["after"] = after
@@ -304,8 +309,9 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
         "fng":    _cached_fetch(cache_dir, "fng", _fetch_fng),
         "stable": _cached_fetch(cache_dir, "stablecoins", _fetch_stablecoins),
         "etf":    _cached_fetch(cache_dir, "etf-daily-v2", _fetch_etf_daily),  # v2: iso 全日期键
-        "hash":   _cached_fetch(cache_dir, "hashrate-1y", _fetch_hashrate_1y),
-        "fund":   _cached_fetch(cache_dir, "funding-history", _fetch_funding_history),
+        # 缓存键随范围扩展 bump (1y→2y / 3页→12页), 避免读到旧短序列磁盘缓存
+        "hash":   _cached_fetch(cache_dir, "hashrate-2y", _fetch_hashrate_2y),
+        "fund":   _cached_fetch(cache_dir, "funding-history-1y", _fetch_funding_history),
         "mvrv": None, "nupl": None, "puell": None,   # 下方由 CM 派生或 bd 兜底
     }
 
@@ -707,5 +713,5 @@ if __name__ == "__main__":
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     cdir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cache")
     os.makedirs(cdir, exist_ok=True)
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else 90
+    n = int(sys.argv[1]) if len(sys.argv) > 1 else 365
     ensure_backfilled(cdir, n)

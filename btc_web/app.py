@@ -393,7 +393,8 @@ def _backfill_worker():
     _t.sleep(30)  # 错开预热高峰, 给 bitcoin-data.com 限额留余量
     for attempt in range(8):
         try:
-            ensure_backfilled(_CACHE_DIR, days=90)
+            # 365 天: 喂满 decision.REPLAY_DAYS 的滞回重放窗口 + 支撑月/年尺度变化展示
+            ensure_backfilled(_CACHE_DIR, days=365)
             break
         except Exception as e:
             print(f"⚠️ 评分历史回填失败 (第 {attempt+1}/8 次): {e}")

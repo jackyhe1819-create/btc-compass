@@ -2159,10 +2159,37 @@ async function fetchScoreHistory(days) {
         const data = await res.json();
         if (!data.success) return;
         renderScoreHistoryChart(data.series || [], data.events || []);
+        renderScoreTrends(data.trends || null);
         renderSignalChanges(data.changes || {});
+        // 180天+ 长视图: 显示回填段战术覆盖率的口径脚注 (诚实标注, 不静默混用)
+        const covNote = document.getElementById('scoreHistoryCoverageNote');
+        if (covNote) covNote.style.display = (days || 90) >= 180 ? 'block' : 'none';
     } catch (e) {
         console.error('Score history fetch failed:', e);
     }
+}
+
+/* 月/季/年尺度评分变化芯片 — trends 来自后端 compute_trends,
+   深度不足的档为 null, 如实显示"历史不足"而非空占位 */
+function renderScoreTrends(trends) {
+    const el = document.getElementById('scoreTrendChips');
+    if (!el) return;
+    if (!trends) { el.innerHTML = ''; return; }
+    const fmt = (t) => {
+        if (!t) return '<span style="opacity:0.55;">— 历史不足</span>';
+        const up = t.delta >= 0;
+        const col = Math.abs(t.delta) < 0.005 ? 'var(--text-muted)'
+                    : (up ? 'var(--positive, #26a17b)' : 'var(--negative, #e05c5c)');
+        const arrow = Math.abs(t.delta) < 0.005 ? '→' : (up ? '↑' : '↓');
+        const tip = `基准 ${t.base_date}: ${Number(t.base).toFixed(2)}`;
+        return `<span style="color:${col};" title="${tip}">${up ? '+' : ''}${Number(t.delta).toFixed(2)} ${arrow}</span>`;
+    };
+    const c = trends.cycle || {}, ta = trends.tactical || {};
+    el.innerHTML =
+        `<span style="opacity:0.8;">周期分变化</span> ` +
+        `30日 ${fmt(c.d30)} · 90日 ${fmt(c.d90)} · 1年 ${fmt(c.d365)}` +
+        `<span style="margin:0 8px; opacity:0.4;">|</span>` +
+        `<span style="opacity:0.8;">战术分</span> 7日 ${fmt(ta.d7)} · 30日 ${fmt(ta.d30)}`;
 }
 
 function renderScoreHistoryChart(series, events) {
