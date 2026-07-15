@@ -11,4 +11,7 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.11
+      # 企业微信群机器人 webhook (决策换档/战术极值提醒); 不设置则提醒功能静默禁用
+      - key: WECOM_WEBHOOK_URL
+        sync: false
     plan: free

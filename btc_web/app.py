@@ -199,6 +199,13 @@ def _do_refresh_dashboard():
         except Exception as e:
             print(f"⚠️ 量化决策计算失败: {e}")
             _dashboard_cache["decision"] = None
+
+        # 决策提醒推送 (换档/战术极值 → 企微等渠道) — 依赖 decision, 故在其后;
+        # check_and_alert 自身永不抛异常, 未配置渠道时为空操作。
+        # 摘要挂进缓存暴露给 /api/dashboard: "渠道未配置"必须可观测,
+        # 不能与"一切正常"不可区分 (2026-07 对抗审查发现)
+        from btc_dashboard.notify import check_and_alert
+        _dashboard_cache["notify"] = check_and_alert(_dashboard_cache, _CACHE_DIR)
         print(f"✅ 仪表盘缓存刷新完成 {_dashboard_cache_timestamp.strftime('%H:%M:%S')}")
     except Exception as e:
         global _last_error

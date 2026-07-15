@@ -307,6 +307,15 @@ def probe_runtime(base_url) -> None:
         for w in dec.get("warnings") or []:
             _report("WARN", f"决策警告: {w}")
 
+    # 提醒推送渠道 (换档/战术极值 → 企微): 未配置时功能静默禁用, 必须可见
+    notify = data.get("notify")
+    if notify is None:
+        _report("WARN", "notify 摘要缺失 (旧版部署或字段被移除)")
+    elif notify.get("channels"):
+        _report("OK", f"提醒渠道已配置: {', '.join(notify['channels'])}")
+    else:
+        _report("WARN", "提醒渠道未配置 (WECOM_WEBHOOK_URL 未设) — 换档提醒不会推送")
+
     # 缓存新鲜度 (用服务端 cache_age_s, 避免时区坑)
     age = data.get("cache_age_s")
     if age is None:
