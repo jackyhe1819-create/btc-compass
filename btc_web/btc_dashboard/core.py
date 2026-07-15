@@ -76,13 +76,16 @@ HALVING_DATES = [
 NEXT_HALVING_ESTIMATE = datetime(2028, 4, 20)
 
 
-# 幂律参数
-POWER_LAW_INTERCEPT = -17.67
-POWER_LAW_SLOPE = 5.93
+# 幂律走廊中线参数 — 全库唯一事实源 (log10 空间: log10(price)=INTERCEPT+SLOPE*log10(距创世天数))
+# = Burger 2019《比特币双对数走廊》中线拟合, 刘教链 2021《比特币的价格走廊》逐字沿用同式
+# (y=10^(-17.01593313+5.84509376*log10(x)))。scoring/backfill/ahr999/幂律走廊显示 四处共用此中线。
+# 勿再分裂: 显示端曾误用 -17.67/5.93, 致卡片"中轨"与评分幂律线在当下相差约 2x (2026-07 收敛)。
+POWER_LAW_INTERCEPT = -17.01  # 截距
+POWER_LAW_SLOPE = 5.84        # 斜率 (幂律指数)
 
-# Ahr999 参数 (九神原版参数)
-AHR999_A = -17.01  # 截距
-AHR999_B = 5.84    # 斜率
+# Ahr999 指数增长估值线即同一条幂律中线 (九神原版参数与 Burger 中线一致), 别名复用避免二次分裂
+AHR999_A = POWER_LAW_INTERCEPT  # 截距
+AHR999_B = POWER_LAW_SLOPE      # 斜率
 
 
 # ============================================================
