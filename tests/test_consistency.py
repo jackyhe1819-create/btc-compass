@@ -264,3 +264,25 @@ def test_halving_dates_single_source():
     assert not offenders, (
         "减半日期字面量出现在 core.py 之外 (应 from btc_dashboard.core import "
         "HALVING_DATES/NEXT_HALVING_ESTIMATE):\n  " + "\n  ".join(offenders))
+
+
+# ------------------------------------------------------------
+# 减半时钟档位唯一事实源 (2026-07: >30月 -1→+0.5 反信号修正)
+# ------------------------------------------------------------
+
+def test_halving_band_single_source_and_boundaries():
+    """档位边界锁死 + 三处实现 (indicators_long/backfill/backtest) 必须引用
+    core.halving_band 同一函数, 防止再分裂成各自的 if 链。"""
+    from btc_dashboard.core import halving_band
+    from btc_dashboard import backfill, indicators_long
+    from backtest import factors
+
+    cases = {11.9: 1, 12.0: 1, 12.1: 0, 24.0: 0, 24.1: -1,
+             29.9: -1, 30.0: -1, 30.1: 0.5, 47.5: 0.5}
+    for m, expect in cases.items():
+        assert halving_band(m) == expect, f"months={m}"
+        assert backfill._band_halving(m) == expect, f"backfill months={m}"
+
+    # 单一事实源: 两个消费模块引用的必须是同一个函数对象
+    assert factors.halving_band is halving_band
+    assert indicators_long.halving_band is halving_band

@@ -30,7 +30,8 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 
-from .core import IndicatorResult, GENESIS_DATE, HALVING_DATES, AHR999_A, AHR999_B, fetch_btc_data
+from .core import (IndicatorResult, GENESIS_DATE, HALVING_DATES, AHR999_A, AHR999_B,
+                   halving_band, fetch_btc_data)
 from .scoring import (
     CYCLE_BUCKETS, TACTICAL_BUCKETS, _compute_bucket_scores,
     cycle_recommendation, PERCENTILE_WINDOW,
@@ -267,7 +268,9 @@ def _band_stable_growth(pct):
     return 1 if pct > 12.0 else 0.5 if pct > 5.5 else 0 if pct > -0.5 else -0.5 if pct > -2.0 else -1
 
 def _band_halving(months):
-    return 1 if months <= 12 else 0 if months <= 24 else -1
+    # 收敛到 core.halving_band 单一事实源 (2026-07: >30月 -1→+0.5 反信号修正;
+    # 当前365天回填窗为第15-27月, 新旧档位逐日一致 → 无需 bump marker)
+    return halving_band(months)
 
 def _band_exch_d30(v):
     # 交易所余额 30日存量变化% (calc_exchange_balance_v2 同阈值)

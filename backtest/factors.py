@@ -21,7 +21,8 @@ import pandas as pd
 # 引入现网常量, 保证参数与生产代码同源
 _BTC_WEB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "btc_web")
 sys.path.insert(0, _BTC_WEB)
-from btc_dashboard.core import GENESIS_DATE, AHR999_A, AHR999_B, HALVING_DATES  # noqa: E402
+from btc_dashboard.core import (GENESIS_DATE, AHR999_A, AHR999_B, HALVING_DATES,  # noqa: E402
+                                halving_band)
 from btc_dashboard.scoring import PERCENTILE_WINDOW  # noqa: E402
 
 
@@ -214,16 +215,13 @@ def cycle_factor_scores(cm: pd.DataFrame,
     ribbons[valid & ~above_hr] = -0.25
     out["Hash Ribbons"] = ribbons
 
-    # ---- 时间周期桶 ----   [calc_halving_cycle: 12/24 个月阈值]
+    # ---- 时间周期桶 ----   [档位=core.halving_band 单一事实源 (12/24/30 月)]
     halvings = pd.Series([pd.Timestamp(d) for d in HALVING_DATES])
     last_h = pd.Series(
         [halvings[halvings <= d].max() if (halvings <= d).any() else halvings.iloc[0]
          for d in idx], index=idx)
     months_since = (pd.Series(idx, index=idx) - last_h).dt.days / 30.44
-    halv = pd.Series(0.0, index=idx)
-    halv[months_since <= 12] = 1.0
-    halv[months_since > 24] = -1.0
-    out["减半周期"] = halv
+    out["减半周期"] = months_since.apply(halving_band).astype(float)
 
     return out
 

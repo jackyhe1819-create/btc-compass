@@ -17,7 +17,7 @@ from .core import (
     IndicatorResult,
     GENESIS_DATE, HALVING_DATES, NEXT_HALVING_ESTIMATE,
     POWER_LAW_INTERCEPT, POWER_LAW_SLOPE,
-    AHR999_A, AHR999_B,
+    AHR999_A, AHR999_B, halving_band,
 )
 
 
@@ -502,20 +502,24 @@ def calc_halving_cycle() -> IndicatorResult:
     total_cycle_days = max(1, (next_halving - last_halving).days)
     progress_pct = min(100, ((total_cycle_days - days_until_next) / total_cycle_days) * 100)
     
-    # 评分逻辑 (文案分段可细化, 分数档位勿动 — 影响评分历史连续性)
+    # 评分档位收敛到 core.halving_band 单一事实源 (2026-07: >30月由-1改+0.5,
+    # 修正复苏段反信号; 证据与连续性论证见 core.halving_band docstring —
+    # 当前回填窗口为第15-27月, 逐日分数新旧一致, 可见评分历史零漂移)
+    score = halving_band(months_since)
     if months_since <= 12:
-        score, color = 1, "🟢"
+        color = "🟢"
         status_text = f"减半后 {months_since:.0f} 个月 (牛市起点)"
     elif months_since <= 24:
-        score, color = 0, "🟡"
+        color = "🟡"
         status_text = f"减半后 {months_since:.0f} 个月 (周期中期)"
     elif months_since <= 30:
-        score, color = -1, "🔴"
+        color = "🔴"
         status_text = (f"减半后 {months_since:.0f} 个月 "
                        f"(历史18-30月段 C1-C3 皆深熊, n=3 仅先验)")
     else:
-        score, color = -1, "🔴"
-        status_text = f"减半后 {months_since:.0f} 个月 (周期后期)"
+        color = "🟢"
+        status_text = (f"减半后 {months_since:.0f} 个月 "
+                       f"(历史30月+段 C1-C3 皆复苏/积累, n=3 仅先验)")
     
     # 添加倒计时信息
     status = f"{status_text} | 下次约 {days_until_next} 天"
@@ -529,7 +533,7 @@ def calc_halving_cycle() -> IndicatorResult:
         priority="P0",
         url="https://www.coinglass.com/halving",
         description="比特币减半是其经济模型的核心事件，大约每四年发生一次。历史上减半后进入牛市，但样本仅 n=3~4。逐周期相位地图见页底「周期相位与事件规律」卡。",
-        method="根据比特币历史减半日期，计算当前所处的减半周期阶段。减半后12个月内历史为牛市早期，24个月后历史进入周期后期（n=3~4 先验，非独立信号）。"
+        method="根据比特币历史减半日期，计算当前所处的减半周期阶段。减半后12个月内历史为牛市早期，24-30个月历史为深熊窗，30个月后历史进入复苏/积累段（n=3~4 先验，非独立信号）。"
     )
 
 
