@@ -15,8 +15,9 @@ btc_dashboard.notify
     避免每次部署把当前档位当"新换档"轰炸一遍
   - 发送失败不提交对应状态 → 下轮仪表盘刷新自然重试; 每类提醒 6h 冷却兜底
   - 演示数据 (data_synthetic) 熔断: 不提醒也不更新状态
-  - 渠道配置驱动: 有对应环境变量才启用; 目前支持企业微信群机器人
-    (WECOM_WEBHOOK_URL), 后续加渠道 = _channels() 里加一项
+  - 渠道配置驱动: 有对应环境变量才启用, 多渠道任一成功即算送达。目前支持
+    企业微信群机器人 (WECOM_WEBHOOK_URL) 与 Server酱³→个人微信 (SERVERCHAN_SENDKEY);
+    后续加渠道 = _channels() 里读一个环境变量 + append 一项
 
 能力边界 (如实声明, 2026-07 对抗审查确认):
   检测只随仪表盘刷新发生 (启动预热 + /api/dashboard 过期请求), 无自带定时器。
@@ -231,12 +232,35 @@ def _send_wecom(text: str, webhook_url: str) -> bool:
         return False
 
 
+def _send_serverchan(title: str, desp: str, sendkey: str) -> bool:
+    """Server酱³ (方糖) → 个人微信服务号消息。title 为通知标题 (限32字),
+    desp 为 markdown 正文。返回是否发送成功。"""
+    import requests
+    try:
+        r = requests.post(f"https://sctapi.ftqq.com/{sendkey}.send",
+                          data={"title": title[:32],
+                                "desp": desp[:30000]},
+                          timeout=10)
+        ok = r.status_code == 200 and r.json().get("code") == 0
+        if not ok:
+            print(f"⚠️ Server酱推送被拒: HTTP {r.status_code} {r.text[:200]}")
+        return ok
+    except Exception as e:
+        print(f"⚠️ Server酱推送失败: {e}")
+        return False
+
+
 def _channels() -> List[Tuple[str, callable]]:
-    """已配置的推送渠道列表。加渠道 = 加一个 (名字, send_fn) 判断分支。"""
+    """已配置的推送渠道列表 (send_fn 签名统一为 (title, text) → bool)。
+    加渠道 = 读一个环境变量 + append 一项。"""
     out = []
     wecom = os.environ.get("WECOM_WEBHOOK_URL", "").strip()
     if wecom:
-        out.append(("wecom", lambda text: _send_wecom(text, wecom)))
+        out.append(("wecom", lambda title, text: _send_wecom(text, wecom)))
+    sendkey = os.environ.get("SERVERCHAN_SENDKEY", "").strip()
+    if sendkey:
+        out.append(("serverchan",
+                    lambda title, text: _send_serverchan(title, text, sendkey)))
     return out
 
 
@@ -306,7 +330,8 @@ def check_and_alert(dashboard: dict, cache_dir: str) -> dict:
         if not channels:
             if not _warned_no_channel:
                 _warned_no_channel = True
-                print("ℹ️ 提醒渠道未配置 (WECOM_WEBHOOK_URL 为空) — 推送功能禁用")
+                print("ℹ️ 提醒渠道未配置 (WECOM_WEBHOOK_URL / SERVERCHAN_SENDKEY "
+                      "均为空) — 推送功能禁用")
             return {"alerts": 0, "sent": 0, "channels": []}
 
         prev_state = _load_state(cache_dir)
@@ -316,7 +341,7 @@ def check_and_alert(dashboard: dict, cache_dir: str) -> dict:
         for alert in alerts:
             ok_any = False
             for name, send in channels:
-                if send(alert["text"]):
+                if send(alert["title"], alert["text"]):
                     ok_any = True
                 else:
                     print(f"⚠️ 提醒 [{alert['kind']}] 经 {name} 发送失败")

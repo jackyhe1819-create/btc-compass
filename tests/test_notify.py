@@ -122,6 +122,7 @@ def test_missing_decision_noop():
 
 def test_check_and_alert_noop_without_channels(tmp_path, monkeypatch):
     monkeypatch.delenv("WECOM_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("SERVERCHAN_SENDKEY", raising=False)
     out = notify.check_and_alert(_dash(), str(tmp_path))
     assert out == {"alerts": 0, "sent": 0, "channels": []}
 
@@ -130,6 +131,7 @@ def test_check_and_alert_end_to_end_with_mock_channel(tmp_path, monkeypatch):
     """配置渠道后: 首轮记基线 → 换档轮真触发 → 发送成功推进状态。"""
     sent_msgs = []
     monkeypatch.setenv("WECOM_WEBHOOK_URL", "https://example.invalid/hook")
+    monkeypatch.delenv("SERVERCHAN_SENDKEY", raising=False)
     monkeypatch.setattr(notify, "_send_wecom", lambda text, url: (sent_msgs.append(text) or True))
 
     out1 = notify.check_and_alert(_dash(cycle_band="减配", lo=15, hi=30), str(tmp_path))
@@ -210,6 +212,7 @@ def test_check_and_alert_send_failure_retries_next_round(tmp_path, monkeypatch):
         return calls["n"] >= 2  # 第一次失败, 第二次成功
 
     monkeypatch.setenv("WECOM_WEBHOOK_URL", "https://example.invalid/hook")
+    monkeypatch.delenv("SERVERCHAN_SENDKEY", raising=False)
     monkeypatch.setattr(notify, "_send_wecom", flaky)
 
     notify.check_and_alert(_dash(cycle_band="减配", lo=15, hi=30), str(tmp_path))  # 基线
@@ -217,3 +220,34 @@ def test_check_and_alert_send_failure_retries_next_round(tmp_path, monkeypatch):
     assert out_fail["sent"] == 0                          # 发送失败
     out_retry = notify.check_and_alert(_dash(cycle_band="标准配置"), str(tmp_path))
     assert out_retry["sent"] == 1                         # 下轮重试成功
+
+
+def test_serverchan_channel_wiring(tmp_path, monkeypatch):
+    """Server酱 渠道: SENDKEY 配置后进入渠道列表, title 与 markdown 正文都传入。"""
+    calls = []
+    monkeypatch.delenv("WECOM_WEBHOOK_URL", raising=False)
+    monkeypatch.setenv("SERVERCHAN_SENDKEY", "SCTxxxxKEY")
+    monkeypatch.setattr(notify, "_send_serverchan",
+                        lambda title, desp, key: (calls.append((title, desp, key)) or True))
+
+    notify.check_and_alert(_dash(cycle_band="减配", lo=15, hi=30), str(tmp_path))  # 基线
+    out = notify.check_and_alert(_dash(cycle_band="标准配置"), str(tmp_path))
+    assert out == {"alerts": 1, "sent": 1, "channels": ["serverchan"]}
+    title, desp, key = calls[0]
+    assert "周期换档" in title                    # Server酱 通知标题
+    assert "目标仓位" in desp and "仅供人工确认" in desp  # markdown 正文
+    assert key == "SCTxxxxKEY"
+
+
+def test_multi_channel_any_success_advances_state(tmp_path, monkeypatch):
+    """双渠道并存: 任一成功即算送达并推进状态 (不因另一渠道失败而卡住重试)。"""
+    monkeypatch.setenv("WECOM_WEBHOOK_URL", "https://example.invalid/hook")
+    monkeypatch.setenv("SERVERCHAN_SENDKEY", "SCTxxxxKEY")
+    monkeypatch.setattr(notify, "_send_wecom", lambda text, url: False)        # 企微挂
+    monkeypatch.setattr(notify, "_send_serverchan", lambda t, d, k: True)      # Server酱通
+
+    notify.check_and_alert(_dash(cycle_band="减配", lo=15, hi=30), str(tmp_path))  # 基线
+    out = notify.check_and_alert(_dash(cycle_band="标准配置"), str(tmp_path))
+    assert out["sent"] == 1                       # 一挂一通仍算送达
+    out2 = notify.check_and_alert(_dash(cycle_band="标准配置"), str(tmp_path))
+    assert out2["alerts"] == 0                     # 状态已推进, 不重复轰炸
