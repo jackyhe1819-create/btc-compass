@@ -430,6 +430,23 @@ def api_version():
     })
 
 
+@app.route('/api/notify-test')
+def api_notify_test():
+    """一次性推送联通性测试。默认禁用 (NOTIFY_TEST_TOKEN 未设时返回 404, 零攻击面);
+    设了 token 才'武装', 需 ?token= 完全匹配。测完在 Render 删除该环境变量即失效。
+    绕过状态机直发, 不影响真实提醒。"""
+    import hmac
+    expected = os.environ.get("NOTIFY_TEST_TOKEN", "").strip()
+    if not expected:
+        return jsonify({"success": False, "error": "not found"}), 404
+    supplied = (request.args.get("token") or "").strip()
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        return jsonify({"success": False, "error": "forbidden"}), 403
+    from btc_dashboard.notify import send_test
+    result = send_test(_CACHE_DIR)
+    return jsonify({"success": result["any"], **result})
+
+
 @app.route('/')
 def index():
     """主页"""

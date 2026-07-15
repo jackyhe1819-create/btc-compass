@@ -222,6 +222,22 @@ def test_check_and_alert_send_failure_retries_next_round(tmp_path, monkeypatch):
     assert out_retry["sent"] == 1                         # 下轮重试成功
 
 
+def test_send_test_hits_all_configured_channels(monkeypatch):
+    """send_test 绕过状态机, 经所有已配置渠道各发一条, 汇总每渠道结果。"""
+    monkeypatch.setenv("WECOM_WEBHOOK_URL", "https://example.invalid/hook")
+    monkeypatch.setenv("SERVERCHAN_SENDKEY", "SCTxxxxKEY")
+    monkeypatch.setattr(notify, "_send_wecom", lambda text, url: True)
+    monkeypatch.setattr(notify, "_send_serverchan", lambda t, d, k: False)  # 一通一挂
+    out = notify.send_test()
+    assert out["channels"] == {"wecom": True, "serverchan": False}
+    assert out["any"] is True
+    # 渠道抛异常也被吞成 False, 不外泄
+    monkeypatch.setattr(notify, "_send_wecom",
+                        lambda text, url: (_ for _ in ()).throw(RuntimeError("boom")))
+    out2 = notify.send_test()
+    assert out2["channels"]["wecom"] is False
+
+
 def test_serverchan_channel_wiring(tmp_path, monkeypatch):
     """Server酱 渠道: SENDKEY 配置后进入渠道列表, title 与 markdown 正文都传入。"""
     calls = []

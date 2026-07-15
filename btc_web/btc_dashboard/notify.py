@@ -250,6 +250,29 @@ def _send_serverchan(title: str, desp: str, sendkey: str) -> bool:
         return False
 
 
+def send_test(cache_dir: str = "") -> dict:
+    """一次性联通性测试 — 绕过状态机/冷却, 直接经所有已配置渠道各发一条测试卡。
+    供受 token 保护的 /api/notify-test 端点调用; 不读写状态文件, 不影响真实提醒。
+    返回 {"channels": {name: bool}, "any": bool}。"""
+    channels = _channels()
+    title = "BTC Compass · 推送联通性测试"
+    text = (
+        "## ✅ BTC Compass 推送测试\n"
+        "这是一条**联通性测试**消息 — 收到即说明该渠道配置正确。\n"
+        "> 非市场信号, 无需任何操作。\n"
+        "真实提醒仅在周期换档 / 战术进极值档时触发, 且始终标注「仅供人工确认」。\n"
+        "[打开仪表盘](https://btc-compass.onrender.com)"
+    )
+    results = {}
+    for name, send in channels:
+        try:
+            results[name] = bool(send(title, text))
+        except Exception as e:
+            print(f"⚠️ 测试推送 [{name}] 异常: {e}")
+            results[name] = False
+    return {"channels": results, "any": any(results.values())}
+
+
 def _channels() -> List[Tuple[str, callable]]:
     """已配置的推送渠道列表 (send_fn 签名统一为 (title, text) → bool)。
     加渠道 = 读一个环境变量 + append 一项。"""
