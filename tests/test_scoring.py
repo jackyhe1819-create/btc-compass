@@ -96,12 +96,12 @@ def test_bucket_scores_dead_bucket_lowers_coverage():
 
 def test_bucket_scores_member_weights_applied():
     cfg = {"链上筹码": {"weight": 1.0,
-                    "members": ["MVRV-Z", "STH成本线", "NUPL", "交易所余额"],
+                    "members": ["MVRV-Z", "STH成本线", "NUPL"],
                     "note": ""}}
-    inds = {"MVRV-Z": _ind(1.0), "STH成本线": _ind(0.0),
-            "NUPL": _ind(0.0), "交易所余额": _ind(0.0)}
+    inds = {"MVRV-Z": _ind(1.0), "STH成本线": _ind(0.0), "NUPL": _ind(0.0)}
     total, _, _ = scoring._compute_bucket_scores(cfg, inds)
-    assert abs(total - 0.35) < 1e-9  # MEMBER_WEIGHTS 里 MVRV-Z 权重 0.35
+    # MEMBER_WEIGHTS 里 MVRV-Z 0.35, 三成员合 0.80 → 0.35/0.80
+    assert abs(total - 0.35 / 0.80) < 1e-9
 
 
 def test_bucket_scores_all_dead_is_zero_coverage():

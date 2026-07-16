@@ -153,12 +153,8 @@ def cycle_factor_scores(cm: pd.DataFrame,
         rolling_percentile_score(nupl),
         _step_score(nupl, [0, 0.25, 0.5, 0.75], [1, 0.5, 0, -0.5, -1]))
 
-    # 交易所余额 v2 (2026-06 重构): 30日存量变化率, 2018+ 分位数阈值
-    # 与现网 calc_exchange_balance_v2 同口径 (10/25/75/90 分位 ≈ -2.1/-0.85/+1.3/+2.9)
-    sply_ex = cm["sply_ex"]
-    d30 = (sply_ex / sply_ex.shift(30) - 1) * 100
-    out["交易所余额"] = _step_score(d30, [-2.1, -0.85, 1.3, 2.9],
-                                    [1, 0.5, 0, -0.5, -1])
+    # 交易所余额于 2026-07 退出周期评分 (ETF 时代常亮看多灯 + 与ETF净流入双重计数,
+    # 留一对照见 scoring.CYCLE_BUCKETS 注); sply_ex 仍供战术分 交易所净流(7d) 使用
 
     # ---- 资金流桶 ----
     # ETF净流入: 近5个交易日合计(百万美元)   [calc_etf_net_flow 阈值, 2026-07 重标定:

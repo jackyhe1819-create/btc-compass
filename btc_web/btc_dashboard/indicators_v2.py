@@ -839,10 +839,12 @@ def calc_exchange_balance_v2() -> IndicatorResult:
         url="https://studio.glassnode.com/metrics?a=BTC&m=distribution.BalanceExchanges",
         description=("全市场交易所 BTC 存量的 30 日变化率（CoinMetrics 机构级聚合, ~265万 BTC, "
                      "T-1 日度更新）。存量下降 = 提币自托管/吸筹（看多），上升 = 充值待卖（看空）。"
-                     "回测 (2018-2026) 该信号 30/90 天前瞻 IC +0.07/+0.10。"),
+                     "⚠️ 2026-07 已退出周期评分, 仅作展示: ETF 时代币迁往托管机构是单向结构趋势, "
+                     "该读数退化为常亮看多灯, 且与 ETF净流入重复计数同一笔资金流。"),
         method=("CoinMetrics 社区 API SplyExNtv 30 日变化率, 按 2018+ 历史分布分位数打分 "
-                "(10/25/75/90 分位 ≈ -2.1/-0.85/+1.3/+2.9%)。每档触发频率 ~10-15%, "
-                "替代旧版'快照对比±0.5%/2%'(94.5%时间无信号)。6h 缓存, 失败降级 mempool.space。"))
+                "(10/25/75/90 分位 ≈ -2.1/-0.85/+1.3/+2.9%)。2026-07 留一对照回测后移出"
+                "链上筹码桶 (2014-2023 有判别力, 2024+ ETF 体制下 IC 转负), 不再计入周期分。"
+                "6h 缓存, 失败降级 mempool.space。"))
 
 
 def calc_exchange_netflow_7d() -> IndicatorResult:

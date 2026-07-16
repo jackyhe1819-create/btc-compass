@@ -19,6 +19,7 @@ btc_dashboard.backfill
   CM 派生 (与 backtest 校准: 相关 0.9996/0.9999/0.94), 价格序列也以 CM 兜底
 - bitcoin-data 降级为可选增强 (STH/SOPR 仅它有; 拿不到当天缺席重归一)
 - 回填因子集同步现网 2026-06 配置: 新增 Ahr999 / 交易所余额(30d) / 交易所净流(7d)
+  (交易所余额于 2026-07 退出周期评分 — ETF 时代结构性失真, 见 scoring.CYCLE_BUCKETS 注)
 """
 
 import os
@@ -51,9 +52,12 @@ _SRC_TTL = 7 * 24 * 3600   # 数据源磁盘缓存 7 天
 #   桶均值逐日变化, 旧回填历史与新口径不可比, 须整段重建
 # v5 (2026-07-16): 减半时钟 12-24月段 0→-1 (顶部与崩塌段, 见 core.halving_band 注) —
 #   回填窗含该段约 9 个月, 历史随新口径重建
-_MARKER = "score_history_backfilled.v5.marker"
+# v6 (2026-07-16): 链上筹码桶移除 交易所余额 (ETF 时代常亮看多灯 + 与ETF净流入双重
+#   计数, 见 scoring.CYCLE_BUCKETS 注) — 桶均值逐日变化, 历史整段重建
+_MARKER = "score_history_backfilled.v6.marker"
 _OLD_MARKERS = ("score_history_backfilled.marker", "score_history_backfilled.v2.marker",
-                "score_history_backfilled.v3.marker", "score_history_backfilled.v4.marker")
+                "score_history_backfilled.v3.marker", "score_history_backfilled.v4.marker",
+                "score_history_backfilled.v5.marker")
 
 
 # ============================================================
@@ -277,10 +281,6 @@ def _band_halving(months):
     # 当前365天回填窗为第15-27月, 新旧档位逐日一致 → 无需 bump marker)
     return halving_band(months)
 
-def _band_exch_d30(v):
-    # 交易所余额 30日存量变化% (calc_exchange_balance_v2 同阈值)
-    return 1 if v <= -2.1 else 0.5 if v <= -0.85 else 0 if v < 1.3 else -0.5 if v < 2.9 else -1
-
 def _band_netflow7(v):
     # 交易所净流(7d) 占存量% (calc_exchange_netflow_7d 同阈值)
     return 1 if v <= -0.8 else 0.5 if v <= -0.4 else 0 if v < 0.45 else -0.5 if v < 1.0 else -1
@@ -323,13 +323,13 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
         "mvrv": None, "nupl": None, "puell": None,   # 下方由 CM 派生或 bd 兜底
     }
 
-    # ── CM 派生: MVRV-Z / NUPL / Puell / 交易所余额Δ30 / 净流7d (与 backtest 同公式) ──
+    # ── CM 派生: MVRV-Z / NUPL / Puell / 净流7d (与 backtest 同公式) ──
     # 2026-07 审查修复: MVRV-Z/NUPL/Puell 改为与现网 _pct_floor_score 同口径的
     # "4年分位为主 + 绝对阈值极值保底" 混合评分 (旧版只有纯绝对阈值, 与实时口径漂移)。
     # 分位/保底两条腿与 backtest/factors.py 完全同源:
     #   MVRV-Z: 分位腿=rolling(730)σ 派生序列, 保底腿=全历史扩张σ 绝对阈值
     #   NUPL / Puell: 分位腿与保底腿同一序列
-    exch30 = netflow7 = None
+    netflow7 = None
     mvrvz_sc = nupl_sc = puell_sc = None   # 预合成的逐日评分 {date: score}
     cm_price_s = None
 
@@ -362,7 +362,6 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
         iss = pd.Series(cm["iss"], index=cm_idx, dtype=float)
         puell_s = iss / iss.rolling(365).mean()
         sply = pd.Series(cm["sply_ex"], index=cm_idx, dtype=float)
-        exch30_s = (sply / sply.shift(30) - 1) * 100
         net_s = pd.Series(cm["net"], index=cm_idx, dtype=float)
         netflow7_s = net_s.rolling(7).sum() / sply * 100
 
@@ -379,7 +378,6 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
         puell_sc = _tail_dict(_extreme_combine(
             _rolling_pct_score(puell_s),
             puell_s.map(_band_puell, na_action="ignore")))
-        exch30 = _tail_dict(exch30_s)
         netflow7 = _tail_dict(netflow7_s)
         cm_price_s = pd.Series(cm["price"], index=cm_idx, dtype=float).dropna()
 
@@ -505,9 +503,6 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
             nu = _at(src["nupl"], d)
             if nu is not None:
                 inds["NUPL"] = _stub("NUPL", _band_nupl(nu))
-        ex30 = _at(exch30, d)
-        if ex30 is not None:
-            inds["交易所余额"] = _stub("交易所余额", _band_exch_d30(ex30))
 
         # 资金流
         if etf_5d is not None and ts in etf_5d.index and not np.isnan(etf_5d.loc[ts]):
