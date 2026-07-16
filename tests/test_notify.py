@@ -238,6 +238,61 @@ def test_send_test_hits_all_configured_channels(monkeypatch):
     assert out2["channels"]["wecom"] is False
 
 
+def test_phase_change_alert_and_baseline():
+    """相位变化: 旧状态无 cycle_phase 键 → 静默基线; 变化且冷却过 → 提醒。"""
+    cp_payload = {"phase": "bear_mid", "name": "熊中·下跌中继", "emoji": "🐻",
+                  "desc": "d", "criteria": {"drawdown_pct": -45.0, "thermometer": 0.1,
+                                            "trend": -1, "ath_age_days": 280},
+                  "stats": {"episodes": 13, "fwd": {"365d": {"median_pct": 4.7,
+                                                             "pos_pct": 51, "n": 700}}}}
+    dash = _dash()
+    dash["cycle_phase"] = cp_payload
+    # 旧状态文件 (相位功能上线前) 无 cycle_phase 键 → 基线不提醒
+    prev = {"cycle_band": "标准配置", "tactical_band": "等待信号", "last_sent": {}}
+    alerts, state = notify.evaluate_alerts(dash, prev, NOW)
+    assert alerts == [] and state["cycle_phase"] == "bear_mid"
+    # 相位变化 → 提醒, 文案带历史置信度与诚实口径
+    prev2 = {"cycle_band": "标准配置", "tactical_band": "等待信号",
+             "cycle_phase": "pullback_or_bear", "last_sent": {}}
+    alerts2, state2 = notify.evaluate_alerts(dash, prev2, NOW)
+    assert len(alerts2) == 1 and alerts2[0]["kind"] == "phase_change"
+    assert alerts2[0]["state_patch"] == {"cycle_phase": "bear_mid"}
+    t = alerts2[0]["text"]
+    assert "回调/熊初" in t and "熊中" in t and "365天收益中位" in t and "样本内" in t
+    assert state2.get("cycle_phase") == "pullback_or_bear"  # patch 前不推进
+    # unknown 相位不参与状态机: 不提醒、不推进已有相位状态
+    dash3 = _dash(); dash3["cycle_phase"] = {"phase": "unknown"}
+    alerts3, state3 = notify.evaluate_alerts(dash3, prev2, NOW)
+    assert alerts3 == []
+    assert state3.get("cycle_phase") == "pullback_or_bear"
+
+
+def test_phase_alert_survives_state_sanitize_roundtrip(tmp_path, monkeypatch):
+    """回归 (2026-07 对抗审查 critical): 相位基线必须经 _save_state→_load_state
+    消毒往返仍存活 — 曾因白名单漏 cycle_phase 使相位推送在生产路径永远不触发,
+    而测试直传 dict 绕过消毒全绿。此测试走真实文件往返。"""
+    sent = []
+    monkeypatch.setenv("WECOM_WEBHOOK_URL", "https://example.invalid/hook")
+    monkeypatch.delenv("SERVERCHAN_SENDKEY", raising=False)
+    monkeypatch.setattr(notify, "_send_wecom", lambda text, url: (sent.append(text) or True))
+
+    def dash_with_phase(phase, name):
+        d = _dash()
+        d["cycle_phase"] = {"phase": phase, "name": name, "emoji": "x", "desc": "d",
+                            "criteria": {"drawdown_pct": -40.0, "thermometer": 0.1,
+                                         "trend": -1, "ath_age_days": 200}, "stats": None}
+        return d
+
+    # 轮1: 记双档基线 (相位基线晚一轮, first_run 提前返回)
+    notify.check_and_alert(dash_with_phase("bear_mid", "熊中·下跌中继"), str(tmp_path))
+    # 轮2: 相位基线落盘
+    notify.check_and_alert(dash_with_phase("bear_mid", "熊中·下跌中继"), str(tmp_path))
+    assert notify._load_state(str(tmp_path)).get("cycle_phase") == "bear_mid"  # 消毒后存活
+    # 轮3: 相位变化 → 必须触发推送
+    out = notify.check_and_alert(dash_with_phase("bear_late", "熊末·冷清超跌"), str(tmp_path))
+    assert out["sent"] == 1 and any("相位变化" in t for t in sent)
+
+
 def test_serverchan_channel_wiring(tmp_path, monkeypatch):
     """Server酱 渠道: SENDKEY 配置后进入渠道列表, title 与 markdown 正文都传入。"""
     calls = []

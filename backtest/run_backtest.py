@@ -141,6 +141,15 @@ def main():
         _json.dump(band_stats, f, ensure_ascii=False, indent=1)
     print(f"📊 决策面板数据资产已更新: {os.path.join(data_dir, 'band_stats.json')}")
 
+    # ---- 周期相位置信度数据资产 (phase_stats.json, 相位卡引用) ----
+    # 防护: 相位统计失败不应中断报告/图表生成 (band_stats 已落盘, 中断会留下
+    # 半更新状态; 2026-07 对抗审查)
+    try:
+        import phase_stats_gen
+        phase_stats_gen.generate(cyc_f, price, os.path.join(data_dir, "phase_stats.json"))
+    except Exception as e:
+        print(f"⚠️ phase_stats 生成失败 (跳过, 相位卡将用旧资产): {e}")
+
     # ---- 图表 ----
     p1 = sc.Panel("BTC 价格 (对数)", height=220, log=True)
     p1.add("BTC/USD", price.loc[CYCLE_START:], "#f7931a")

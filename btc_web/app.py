@@ -200,12 +200,30 @@ def _do_refresh_dashboard():
             print(f"⚠️ 量化决策计算失败: {e}")
             _dashboard_cache["decision"] = None
 
-        # 决策提醒推送 (换档/战术极值 → 企微等渠道) — 依赖 decision, 故在其后;
-        # check_and_alert 自身永不抛异常, 未配置渠道时为空操作。
+        # 周期相位判读 (叙事层, 规则式 + 历史频率置信度) — 依赖评分历史与完整价格史。
+        # 演示数据熔断: 合成价格算出的相位是无意义的, 不展示 (2026-07 对抗审查)
+        try:
+            if result.data_synthetic:
+                _dashboard_cache["cycle_phase"] = None
+            else:
+                from btc_dashboard.cycle_phase import compute_cycle_phase
+                price_map = {ts.strftime("%Y-%m-%d"): float(v)
+                             for ts, v in df["price"].dropna().items()}
+                _dashboard_cache["cycle_phase"] = compute_cycle_phase(
+                    load_history_entries(_CACHE_DIR), price_map)
+        except Exception as e:
+            print(f"⚠️ 周期相位计算失败: {e}")
+            _dashboard_cache["cycle_phase"] = None
+
+        # 决策提醒推送 (换档/战术极值/相位变化 → 企微等渠道) — 依赖 decision 与
+        # cycle_phase, 故在其后; check_and_alert 自身永不抛异常, 未配置渠道时为空操作。
         # 摘要挂进缓存暴露给 /api/dashboard: "渠道未配置"必须可观测,
         # 不能与"一切正常"不可区分 (2026-07 对抗审查发现)
         from btc_dashboard.notify import check_and_alert
         _dashboard_cache["notify"] = check_and_alert(_dashboard_cache, _CACHE_DIR)
+        # 补落盘: cycle_phase/notify 字段在第二次落盘之后才写入,
+        # 不再落盘会使重启恢复的缓存缺这两个字段 (2026-07 对抗审查)
+        _save_cache_to_disk("dashboard", _dashboard_cache, _dashboard_cache_timestamp)
         print(f"✅ 仪表盘缓存刷新完成 {_dashboard_cache_timestamp.strftime('%H:%M:%S')}")
     except Exception as e:
         global _last_error

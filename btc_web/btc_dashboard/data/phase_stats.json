@@ -1,0 +1,172 @@
+{
+ "generated": "2026-07-16 14:27",
+ "window": "2014-06-01 ~ 2026-05-23",
+ "note": "历史频率统计, 样本内标定 (相位规则与统计同源同史), n=3~4 个周期; 是'该判读历史上的含义'而非校准概率, 非收益承诺",
+ "phases": {
+  "bubble": {
+   "name": "泡沫·牛市末",
+   "episodes": 18,
+   "days": 373,
+   "fwd": {
+    "90d": {
+     "median_pct": 3.8,
+     "pos_pct": 52.0,
+     "n": 373
+    },
+    "180d": {
+     "median_pct": -4.5,
+     "pos_pct": 47.0,
+     "n": 373
+    },
+    "365d": {
+     "median_pct": -8.7,
+     "pos_pct": 46.0,
+     "n": 337
+    }
+   },
+   "top_lead_days": {
+    "min": 0,
+    "median": 174,
+    "max": 317,
+    "n": 18
+   }
+  },
+  "boom": {
+   "name": "繁荣·牛市中",
+   "episodes": 17,
+   "days": 736,
+   "fwd": {
+    "90d": {
+     "median_pct": 7.9,
+     "pos_pct": 63.0,
+     "n": 736
+    },
+    "180d": {
+     "median_pct": 21.5,
+     "pos_pct": 71.0,
+     "n": 736
+    },
+    "365d": {
+     "median_pct": 57.3,
+     "pos_pct": 67.0,
+     "n": 623
+    }
+   }
+  },
+  "pullback_or_bear": {
+   "name": "回调/熊初·待确认",
+   "episodes": 10,
+   "days": 359,
+   "fwd": {
+    "90d": {
+     "median_pct": -0.7,
+     "pos_pct": 49.0,
+     "n": 329
+    },
+    "180d": {
+     "median_pct": 22.6,
+     "pos_pct": 54.0,
+     "n": 251
+    },
+    "365d": {
+     "median_pct": -19.4,
+     "pos_pct": 31.0,
+     "n": 238
+    }
+   },
+   "resolution": {
+    "confirmed_pullback": 5,
+    "confirmed_bear": 3,
+    "pending": 2
+   }
+  },
+  "bear_mid": {
+   "name": "熊中·下跌中继",
+   "episodes": 13,
+   "days": 718,
+   "fwd": {
+    "90d": {
+     "median_pct": -16.8,
+     "pos_pct": 22.0,
+     "n": 658
+    },
+    "180d": {
+     "median_pct": -31.9,
+     "pos_pct": 18.0,
+     "n": 646
+    },
+    "365d": {
+     "median_pct": 5.8,
+     "pos_pct": 52.0,
+     "n": 646
+    }
+   }
+  },
+  "bear_late": {
+   "name": "熊末·冷清超跌",
+   "episodes": 14,
+   "days": 1082,
+   "fwd": {
+    "90d": {
+     "median_pct": 20.8,
+     "pos_pct": 75.0,
+     "n": 1082
+    },
+    "180d": {
+     "median_pct": 51.2,
+     "pos_pct": 90.0,
+     "n": 1082
+    },
+    "365d": {
+     "median_pct": 129.5,
+     "pos_pct": 98.0,
+     "n": 1082
+    }
+   }
+  },
+  "early_bull": {
+   "name": "牛初·修复启动",
+   "episodes": 11,
+   "days": 282,
+   "fwd": {
+    "90d": {
+     "median_pct": 12.1,
+     "pos_pct": 76.0,
+     "n": 282
+    },
+    "180d": {
+     "median_pct": 59.6,
+     "pos_pct": 90.0,
+     "n": 282
+    },
+    "365d": {
+     "median_pct": 153.4,
+     "pos_pct": 100.0,
+     "n": 282
+    }
+   }
+  },
+  "transition": {
+   "name": "过渡·无鲜明相位",
+   "episodes": 19,
+   "days": 825,
+   "fwd": {
+    "90d": {
+     "median_pct": 16.3,
+     "pos_pct": 58.0,
+     "n": 825
+    },
+    "180d": {
+     "median_pct": 21.4,
+     "pos_pct": 60.0,
+     "n": 825
+    },
+    "365d": {
+     "median_pct": 111.1,
+     "pos_pct": 72.0,
+     "n": 802
+    }
+   }
+  }
+ }
+}

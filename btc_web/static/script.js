@@ -477,6 +477,57 @@ function renderDashboard(data) {
     // 渲染今日量化决策面板
     renderDecisionPanel(data.decision);
     renderTriggerLevels(data.trigger_levels);
+    renderCyclePhase(data.cycle_phase);
+}
+
+/* 周期相位判读卡 — 规则式六相位 + 历史频率置信度 (叙事层, 不驱动仓位) */
+function renderCyclePhase(cp) {
+    const el = document.getElementById('cyclePhaseCard');
+    const section = document.getElementById('cyclePhaseSection');
+    if (!el || !section) return;
+    if (!cp || !cp.phase || cp.phase === 'unknown') { section.style.display = 'none'; return; }
+    section.style.display = '';
+
+    const cr = cp.criteria || {};
+    const fmt = (v, suf = '') => (v === null || v === undefined) ? 'n/a' : `${v}${suf}`;
+    const stats = cp.stats || {};
+    const fwd = stats.fwd || {};
+    // 着色按"信念度"而非中位数符号: 掷硬币级统计 (如 +4.9%/51%) 不得以肯定色
+    // 呈现诱导抄底/杀跌 (2026-07 对抗审查)
+    const statChips = ['90d', '180d', '365d'].filter(w => fwd[w]).map(w => {
+        const s = fwd[w];
+        const cls = (s.median_pct > 0 && s.pos_pct >= 60) ? 'pos'
+                  : (s.median_pct < 0 && s.pos_pct <= 40) ? 'neg' : '';
+        return `<span class="decision-stat-chip ${cls}" title="日级样本 ${s.n} (窗口重叠, 独立性远低于表面 n)">
+            ${w} 中位 ${s.median_pct >= 0 ? '+' : ''}${s.median_pct}% · ${s.pos_pct}% 为正</span>`;
+    }).join('') || '<span class="decision-stat-empty">相位统计不可用 (phase_stats.json 未随部署?)</span>';
+    const epLine = stats.episodes
+        ? `<div class="decision-pending muted">历史同相位 ${stats.episodes} 段 / ${stats.days} 天 · 前瞻收益为日级重叠样本, 统计力弱于表面样本数</div>` : '';
+
+    let resLine = '';
+    if (stats.resolution) {
+        const r = stats.resolution;
+        resLine = `<div class="decision-pending muted">该模糊态历史事后分辨: 回调 ${r.confirmed_pullback} 段 / 熊初 ${r.confirmed_bear} 段` +
+                  (r.pending ? ` / 确认中 ${r.pending} 段 (观察未满一年)` : '') + `</div>`;
+    }
+    let leadLine = '';
+    if (stats.top_lead_days) {
+        const l = stats.top_lead_days;
+        leadLine = `<div class="decision-pending muted">泡沫信号距其后一年内最高点 ${l.min}~${l.max} 天 (中位 ${l.median}, n=${l.n} 段) — 过热≠立刻见顶</div>`;
+    }
+
+    el.innerHTML = `
+        <div class="decision-card-title">🧬 周期相位判读
+            <span class="decision-freq">规则式 · 历史频率置信度 · 叙事参考</span></div>
+        <div style="font-size:1.25rem; font-weight:700; margin:6px 0 2px;">
+            ${cp.emoji || ''} ${cp.name} <span style="font-size:0.75rem; color:var(--text-muted); font-weight:normal;">自 ${cp.since || 'n/a'}</span></div>
+        <div style="font-size:0.82rem; color:var(--text-muted); margin-bottom:8px;">${cp.desc || ''}</div>
+        <div style="font-size:0.78rem; margin-bottom:6px;">
+            判定依据: 距前高 <b>${fmt(cr.drawdown_pct, '%')}</b> · 温度计 <b>${fmt(cr.thermometer)}</b>
+            · 趋势过滤器 <b>${fmt(cr.trend)}</b> · 距ATH <b>${fmt(cr.ath_age_days, ' 天')}</b></div>
+        <div>${statChips}</div>
+        ${epLine}${resLine}${leadLine}
+        <div class="decision-footnote" style="margin-top:6px;">${cp.note || ''}</div>`;
 }
 
 // 周期相位与事件规律卡：启动时拉一次（数据慢变，与快照解耦）

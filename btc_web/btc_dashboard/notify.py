@@ -124,6 +124,25 @@ def evaluate_alerts(dashboard: dict, prev_state: dict,
     else:
         new_state["cycle_band"] = cur_cycle
 
+    # ── 3. 周期相位变化 (叙事层, 低频 ~4-8次/年) ──
+    cp = dashboard.get("cycle_phase") or {}
+    cur_phase = cp.get("phase")
+    if cur_phase and cur_phase != "unknown":
+        prev_phase = prev_state.get("cycle_phase")
+        if prev_phase is None:
+            new_state["cycle_phase"] = cur_phase  # 相位功能后上线: 旧状态文件无此键, 静默记基线
+        elif cur_phase != prev_phase and _cooled("phase_change"):
+            alerts.append({
+                "kind": "phase_change",
+                "title": f"周期相位: {cp.get('name', cur_phase)}",
+                "text": _format_phase_alert(dashboard, prev_phase),
+                "state_patch": {"cycle_phase": cur_phase},
+            })
+        elif cur_phase != prev_phase:
+            pass  # 冷却中不推进, 冷却后补发
+        else:
+            new_state["cycle_phase"] = cur_phase
+
     # ── 2. 战术极值进入 ──
     # 冷却键按档名分键: 「入场窗口」与「杠杆拥挤」语义相反, 从一个极端对穿到
     # 另一个极端 (跨 0.60 分幅) 不是抖动, 不能被共享冷却吞掉保护性信号
@@ -205,6 +224,33 @@ def _format_tactical_alert(dashboard: dict, prev_band: str) -> str:
         f"{_warnings_block(dashboard)}\n"
         f"战术分只定执行节奏不改目标仓位; 文中回测统计为样本内参考, "
         f"非收益承诺 — 提醒仅供人工确认\n"
+        f"[打开仪表盘](https://btc-compass.onrender.com)"
+    )
+
+
+def _format_phase_alert(dashboard: dict, prev_phase: str) -> str:
+    from .cycle_phase import PHASES
+    cp = dashboard.get("cycle_phase") or {}
+    cr = cp.get("criteria") or {}
+    prev_name = PHASES.get(prev_phase, {}).get("name", prev_phase or "n/a")
+    stats = cp.get("stats") or {}
+    f365 = (stats.get("fwd") or {}).get("365d")
+    stat_line = (f"\n> 历史同相位 {stats.get('episodes')} 段: 365天收益中位 "
+                 f"{f365['median_pct']:+.1f}%, {f365['pos_pct']:.0f}% 为正 (样本内)"
+                 if f365 else "")
+    res = stats.get("resolution")
+    res_line = (f"\n> 该模糊态历史分辨: 回调 {res['confirmed_pullback']} / "
+                f"熊初 {res['confirmed_bear']} / 确认中 {res['pending']}" if res else "")
+    return (
+        f"## {cp.get('emoji','')} BTC Compass · 周期相位变化\n"
+        f"**{prev_name} → {cp.get('name')}**\n"
+        f"{cp.get('desc','')}\n"
+        f"> 距前高 {cr.get('drawdown_pct')}% · 温度计 {_fmt_score(cr.get('thermometer'))} · "
+        f"趋势 {_fmt_score(cr.get('trend'))} · 距ATH {cr.get('ath_age_days')} 天"
+        f"{stat_line}{res_line}\n"
+        f"> 周期分 {_fmt_score(dashboard.get('total_score'))} · "
+        f"BTC {_fmt_price(dashboard.get('btc_price'))}\n"
+        f"规则式判读, n=3~4 周期样本内先验 — 叙事参考, 仓位仍由周期分档位管理\n"
         f"[打开仪表盘](https://btc-compass.onrender.com)"
     )
 
@@ -303,7 +349,9 @@ def _sanitize_state(raw) -> dict:
     if not isinstance(raw, dict):
         return {}
     out = {}
-    for k in ("cycle_band", "tactical_band"):
+    # ⚠️ 新增状态键必须同步加进此白名单 — cycle_phase 曾因漏加导致相位推送
+    # 在生产路径永远走"无键→记基线"分支, 一条都发不出 (2026-07 对抗审查 critical)
+    for k in ("cycle_band", "tactical_band", "cycle_phase"):
         if isinstance(raw.get(k), str):
             out[k] = raw[k]
     ls = raw.get("last_sent")

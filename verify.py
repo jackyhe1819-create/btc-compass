@@ -307,7 +307,23 @@ def probe_runtime(base_url) -> None:
         for w in dec.get("warnings") or []:
             _report("WARN", f"决策警告: {w}")
 
-    # 提醒推送渠道 (换档/战术极值 → 企微): 未配置时功能静默禁用, 必须可见
+    # 周期相位判读卡 (叙事层)
+    cp = data.get("cycle_phase")
+    if not cp:
+        _report("WARN", "周期相位读数缺失 (价格史降级/演示数据/计算失败/旧版部署)")
+    else:
+        from btc_dashboard.cycle_phase import PHASES as _PHASES
+        if cp.get("phase") == "unknown":
+            # 因子缺席的诚实态, 与 phase_stats 资产缺失是两回事 (勿误诊)
+            _report("WARN", "周期相位: 数据不足无法判读 (关键因子缺席)")
+        elif cp.get("phase") in _PHASES:
+            tail = "" if cp.get("stats") else " (⚠️ phase_stats.json 未随部署)"
+            _report("OK" if cp.get("stats") else "WARN",
+                    f"周期相位: {cp.get('name')} (自 {cp.get('since')}){tail}")
+        else:
+            _report("FAIL", f"周期相位「{cp.get('phase')}」不在已知相位中")
+
+    # 提醒推送渠道 (换档/战术极值/相位变化 → 企微): 未配置时功能静默禁用, 必须可见
     notify = data.get("notify")
     if notify is None:
         _report("WARN", "notify 摘要缺失 (旧版部署或字段被移除)")

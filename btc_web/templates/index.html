@@ -16,7 +16,7 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>₿</text></svg>">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-16">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=compass-17">
     <!-- 防止主题闪烁：在 CSS 加载前立即恢复主题（v2: 默认米白色） -->
     <script>
         (function() {
@@ -122,6 +122,11 @@
                 <div class="decision-card" id="decisionTriggers" style="display:none; margin-top:12px;"></div>
                 <div class="decision-warnings" id="decisionWarnings" style="display:none;"></div>
                 <div class="decision-footnote" id="decisionFootnote"></div>
+            </section>
+
+            <!-- 周期相位判读 (叙事层: 规则式六相位 + 历史频率置信度; 不驱动仓位) -->
+            <section class="decision-section" id="cyclePhaseSection" style="display:none; margin-top:12px;">
+                <div class="decision-card" id="cyclePhaseCard"></div>
             </section>
 
             <!-- Score Gauge + Summary Table -->
@@ -967,7 +972,7 @@
         <p style="margin: 6px 0 0 0; font-size: 0.75rem; color: var(--text-muted);">点击地址即可复制</p>
     </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}?v=compass-16"></script>
+    <script src="{{ url_for('static', filename='script.js') }}?v=compass-17"></script>
 </body>
 
 </html>
