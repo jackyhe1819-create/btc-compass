@@ -1,5 +1,5 @@
 {
- "generated": "2026-07-16 10:54",
+ "generated": "2026-07-16 14:27",
  "source": "backtest/run_backtest.py 分档前瞻收益 (样本内标定, 见 report.md 局限)",
  "cycle_window": "2014-01-01 → 2026-05-23",
  "tactical_window": "2018-02-01 → 2026-05-23",

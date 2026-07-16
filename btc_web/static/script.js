@@ -478,6 +478,87 @@ function renderDashboard(data) {
     renderDecisionPanel(data.decision);
     renderTriggerLevels(data.trigger_levels);
     renderCyclePhase(data.cycle_phase);
+    renderHorizonGuide(data);
+}
+
+/* 按持有期使用指南 — 各读数的"有效射程"与当前指引 (纯展示, 数据取自决策/相位 payload) */
+function renderHorizonGuide(data) {
+    const el = document.getElementById('horizonGuideCard');
+    const section = document.getElementById('horizonGuideSection');
+    if (!el || !section) return;
+    const d = data.decision, cp = data.cycle_phase;
+    if (!d || !d.cycle) { section.style.display = 'none'; return; }
+    section.style.display = '';
+
+    const c = d.cycle, t = d.tactical || {};
+    const stat = (stats, w) => {
+        const s = stats && stats[w];
+        return s ? `中位 ${s.median >= 0 ? '+' : ''}${s.median}% · 胜率 ${s.win}%` : '—';
+    };
+    const pstat = (w) => {
+        const s = cp && cp.stats && cp.stats.fwd && cp.stats.fwd[w];
+        return s ? `中位 ${s.median_pct >= 0 ? '+' : ''}${s.median_pct}% · ${s.pos_pct}% 为正` : '—';
+    };
+    const rows = [
+        {
+            h: '🕐 短线', span: '日内 ~ 2 周', watch: '战术分 (仅执行节奏)',
+            now: `「${t.band || 'n/a'} · ${t.pace || 'n/a'}」`,
+            stat: `该档 14d: ${stat(t.stats, '14d')}`,
+            note: '⚠️ 本系统在此射程无方向性信息 — 只作执行节奏与杠杆闸门, 勿当短线信号',
+            logic: '构成: 杠杆温度 35% (资金费率7d 0.4 / 期货基差 0.4 / 多空比 0.2 — 衍生品拥挤度, 逆向计分) + 动量结构 30% (MACD/RSI14/SOPR/布林带) + 市场情绪 20% (恐惧贪婪, 仅极值计分) + 链上资金流 15% (交易所净流7d)。' +
+                   '为何"非方向信号": 快因子日频噪声主导, 7天方向 IC≈0.05; 12年回测中用战术分门控仓位对净值无显著贡献 — 因此设计上它只决定"分几批、隔多久、可否用杠杆", 不决定买卖方向。有效的部分是档位极值的条件统计 (入场窗口=杠杆出清+动量配合; 杠杆拥挤=防追高防爆仓, 非现货卖出信号)。',
+        },
+        {
+            h: '📅 波段', span: '1 ~ 3 个月', watch: '周期档位(敞口上限) + 战术档(入场点)',
+            now: `档位「${c.band}」 目标 ${c.target_lo}-${c.target_hi}%`,
+            stat: `该档 90d: ${stat(c.stats, '90d')}`,
+            note: '周期档定敞口, 战术入场窗口定分批时点, 相位作语境',
+            logic: '周期分映射到七档仓位区间 (防守0-5% ~ 重仓80-100%), 换档走滞回规则: 分数须越过当前档边界 ±0.05 且新档连续 5 个快照确认 — 12年回测把换档从每年63次压到约7次, 决策才可执行。' +
+                   '波段射程看 90d 列的原因: 周期分 90 天 IC≈0.29, 有判别力但弱于长窗 — 所以周期档只定"敞口上限"而非精确择时, 入场时点交给战术档, 语境交给相位。条件统计来自 12 年分档回测 (band_stats, 样本内)。',
+        },
+        {
+            h: '📆 长线', span: '3 ~ 18 个月', watch: '周期分 + 滞回换档推送',
+            now: `档位「${c.band}」 ${c.action || ''}`,
+            stat: `该档 365d: ${stat(c.stats, '365d')}`,
+            note: '周期分在此射程判别力最强 (IC 随窗口单调走强), 换档推送即操作信号',
+            logic: '构成 (六桶加权): 趋势伸展 25% (200周热图/幂律走廊/PiCycle/Ahr999) + 链上筹码 25% (MVRV-Z/STH成本线/NUPL/交易所余额) + 资金流 20% (ETF净流/稳定币增速) + 趋势确认 15% (价格vs20周EMA+200日均线斜率) + 矿工经济 10% + 减半钟 5%。' +
+                   '关键机制①分桶去相关: 同信息源的因子桶内平均, 不重复计票; ②滚动4年分位归一: 打"当前值在过去4年的百分位"而非绝对阈值 — 自适应周期振幅衰减 (绝对阈值会因每轮顶部越来越矮而永远打不出 -1)。慢因子(估值/筹码)的信息频率天然在季度-年度尺度, 故 IC 随窗口单调走强 (90d 0.29 → 365d 0.60, 样本内)。',
+        },
+        {
+            h: '🗓️ 囤币', span: '> 18 个月', watch: '周期相位 + 温度计',
+            now: cp ? `相位「${cp.name}」 温度计 ${cp.criteria && cp.criteria.thermometer != null ? cp.criteria.thermometer : 'n/a'}` : '相位不可用',
+            stat: `该相位 365d: ${pstat('365d')}`,
+            note: '历史最佳积累窗口 = 熊末/牛初相位 — 相位切换会推送提醒',
+            logic: '温度计 = 只取反转侧因子重新合成 (趋势伸展 45% + 链上筹码 45% [刻意剔除交易所余额: ETF时代结构性失真] + 减半钟 10%), 排除趋势/资金流等顺周期因子 — 因为在顶部它们会把估值警报中和掉 (2025-10 顶点: 周期分 +0.08 而温度计 -0.55)。' +
+                   '为何温度计不直接当仓位分: 反转信号长期性早到 (2024-03 即报 -0.52, 距最终顶还有19个月/+70%), 直接驱动仓位 12年回测 Sharpe 0.73 vs 现行周期分 1.16 — 故只作位置判读。' +
+                   '相位 = 机械规则组合, 如 熊末 = 距前高回撤≥50% 且 温度计≥0.35 且 距顶>300天; 泡沫 = 距前高<12% 且 温度计≤-0.5。置信度 = 历史同相位的前瞻收益频率 (n=3~4个周期, 样本内, 非校准概率)。',
+        },
+    ];
+    el.innerHTML = `
+        <div class="decision-card-title">⏱️ 按持有期使用指南
+            <span class="decision-freq">各读数的有效射程 · 条件统计为样本内历史频率</span></div>
+        <div style="overflow-x:auto;">
+        <table style="width:100%; min-width:640px; border-collapse:collapse; font-size:0.78rem; margin-top:6px;">
+            <thead><tr style="color:var(--text-muted); text-align:left;">
+                <th style="padding:4px 8px 4px 2px;">持有期</th><th style="padding:4px 8px;">该看什么</th>
+                <th style="padding:4px 8px;">当前指引</th><th style="padding:4px 8px;">历史条件统计</th></tr></thead>
+            <tbody>${rows.map(r => `
+                <tr style="border-top:1px solid var(--border-color);">
+                    <td style="padding:6px 8px 6px 2px; white-space:nowrap;"><b>${r.h}</b><br>
+                        <span style="color:var(--text-muted); font-size:0.72rem;">${r.span}</span></td>
+                    <td style="padding:6px 8px;">${r.watch}</td>
+                    <td style="padding:6px 8px;">${r.now}</td>
+                    <td style="padding:6px 8px; white-space:nowrap;">${r.stat}</td>
+                </tr>
+                <tr><td colspan="4" style="padding:0 8px 6px 2px; color:var(--text-muted); font-size:0.72rem;">${r.note}
+                    <details style="margin-top:2px;"><summary style="cursor:pointer; user-select:none;">📖 底层逻辑</summary>
+                        <div style="padding:6px 8px; margin-top:4px; background:var(--card-bg); border:1px solid var(--border-color); border-radius:8px; line-height:1.6;">${r.logic}</div>
+                    </details></td></tr>`).join('')}
+            </tbody>
+        </table></div>
+        <div class="decision-footnote" style="margin-top:4px;">
+            条件统计 = 历史上处于同档位/相位时的前瞻收益分布 (12 年回测, 样本内, 非收益承诺);
+            短线射程的诚实结论: 战术分 7 天方向 IC≈0.05, 接近无信息。</div>`;
 }
 
 /* 周期相位判读卡 — 规则式六相位 + 历史频率置信度 (叙事层, 不驱动仓位) */
