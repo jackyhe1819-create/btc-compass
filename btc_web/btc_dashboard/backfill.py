@@ -49,9 +49,11 @@ _SRC_TTL = 7 * 24 * 3600   # 数据源磁盘缓存 7 天
 #   并支撑月/年尺度评分变化展示; 算力拉长至 2y、资金费率翻页至 ~1y 配套
 # v4 (2026-07-16): 趋势伸展桶移除 Mayer Multiple (反信号, 见 scoring.CYCLE_BUCKETS 注) —
 #   桶均值逐日变化, 旧回填历史与新口径不可比, 须整段重建
-_MARKER = "score_history_backfilled.v4.marker"
+# v5 (2026-07-16): 减半时钟 12-24月段 0→-1 (顶部与崩塌段, 见 core.halving_band 注) —
+#   回填窗含该段约 9 个月, 历史随新口径重建
+_MARKER = "score_history_backfilled.v5.marker"
 _OLD_MARKERS = ("score_history_backfilled.marker", "score_history_backfilled.v2.marker",
-                "score_history_backfilled.v3.marker")
+                "score_history_backfilled.v3.marker", "score_history_backfilled.v4.marker")
 
 
 # ============================================================

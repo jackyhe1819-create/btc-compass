@@ -277,7 +277,8 @@ def test_halving_band_single_source_and_boundaries():
     from btc_dashboard import backfill, indicators_long
     from backtest import factors
 
-    cases = {11.9: 1, 12.0: 1, 12.1: 0, 24.0: 0, 24.1: -1,
+    # 2026-07: 12-24月由 0 改 -1 (顶部与崩塌段, C1-C4 复刻, 留一对照 IC/Sharpe/回撤全面占优)
+    cases = {11.9: 1, 12.0: 1, 12.1: -1, 24.0: -1, 24.1: -1,
              29.9: -1, 30.0: -1, 30.1: 0.5, 47.5: 0.5}
     for m, expect in cases.items():
         assert halving_band(m) == expect, f"months={m}"
