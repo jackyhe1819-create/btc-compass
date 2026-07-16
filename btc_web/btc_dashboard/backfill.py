@@ -47,8 +47,11 @@ _SRC_TTL = 7 * 24 * 3600   # 数据源磁盘缓存 7 天
 # v2 (2026-07-10 对抗性审查修复): Pi Cycle 旧编码 / ETF 日期键 / MVRV-Z·NUPL·Puell 分位混合口径
 # v3 (2026-07-15): 回填窗口 90→365 天 — 喂满 decision.REPLAY_DAYS=365 的滞回重放窗口,
 #   并支撑月/年尺度评分变化展示; 算力拉长至 2y、资金费率翻页至 ~1y 配套
-_MARKER = "score_history_backfilled.v3.marker"
-_OLD_MARKERS = ("score_history_backfilled.marker", "score_history_backfilled.v2.marker")
+# v4 (2026-07-16): 趋势伸展桶移除 Mayer Multiple (反信号, 见 scoring.CYCLE_BUCKETS 注) —
+#   桶均值逐日变化, 旧回填历史与新口径不可比, 须整段重建
+_MARKER = "score_history_backfilled.v4.marker"
+_OLD_MARKERS = ("score_history_backfilled.marker", "score_history_backfilled.v2.marker",
+                "score_history_backfilled.v3.marker")
 
 
 # ============================================================
