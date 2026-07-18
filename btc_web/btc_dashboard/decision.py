@@ -37,6 +37,11 @@ from .scoring import factor_coverage_from_buckets
 HYST_DELTA = 0.05
 HYST_CONFIRM = 5
 
+# 数据质量护栏阈值 — 决策警示文案与 confidence 三档分级严格同源引用这两个常量,
+# 改一处即两处同步 (tests/test_consistency.py 锁死"置信闸门阈值 == 警示触发阈值")。
+COVERAGE_WARN_THRESHOLD = 0.5             # 因子级覆盖率警示/存疑阈值
+MIN_RELIABLE_HISTORY = HYST_CONFIRM * 4   # 滞回可信最小历史深度 (=20)
+
 # 回填保证的最小历史深度 — app.py/backfill.py 引用此常量, 确保滞回重放窗口喂满
 REPLAY_DAYS = 365
 
@@ -89,6 +94,80 @@ def _load_band_stats() -> Optional[dict]:
             print(f"⚠️ band_stats.json 加载失败 (决策面板将不含回测统计): {e}")
             _band_stats_cache = {}
     return _band_stats_cache or None
+
+
+# ============================================================
+# 个人仓位政策层 (2026-07 新增) — 纯叠加 overlay, 不碰任何评分/档位数学
+# ============================================================
+# 把标准 0-100% 档位以中性(50%)为轴, 仿射映射进用户真实操作区间 [floor,ceiling]:
+# 对 BTC 占净资产 84%、长持信念的用户,"防守区 0-5%""重仓区 80-100%"是无操作空间的
+# 抽象档位; 映射后防守档→向 floor 减仓(而非清仓)、重仓档→向 ceiling 加仓, 提升可执行性。
+# 关键纪律: band_stats.json 回测统计基于标准映射标定, 个人区间只改幅度不改方向 —
+# 故绝不改写原 target_lo/hi/mid, 只发一个并列子键 policy, 且明标为偏好校准非回测背书。
+_POLICY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "data", "position_policy.json")
+_policy_cache = None
+
+_POLICY_NOTE = ("个人偏好校准 (非回测背书): 标准档位以中性(50%)为轴线性映射进你的操作"
+                "区间 [floor,ceiling]%, 净信号强弱在此区间内加/减仓。band_stats 回测统计"
+                "基于标准 0-100% 映射标定, 自定义区间只改变幅度、不改变方向。")
+
+
+def _load_position_policy() -> Optional[dict]:
+    """加载个人仓位政策 (缺失/损坏时禁用政策层, 决策照常输出标准档位)。"""
+    global _policy_cache
+    if _policy_cache is None:
+        try:
+            with open(_POLICY_PATH, "r", encoding="utf-8") as f:
+                _policy_cache = json.load(f)
+        except Exception as e:
+            print(f"⚠️ position_policy.json 加载失败 (个人政策层禁用): {e}")
+            _policy_cache = {}
+    return _policy_cache or None
+
+
+def apply_position_policy(band_lo, band_hi, band_mid,
+                          policy: Optional[dict]) -> Optional[dict]:
+    """把标准档位仓位 (band_lo/hi/mid, 均为 0-100%) 线性投影进个人操作区间
+    [floor, ceiling] 并 clamp, 返回并列的个人目标带。
+
+    纯函数, 无副作用: 不改写传入的标准档位。policy 缺失/未启用/配置非法
+    (要求 0<=floor<=baseline<=ceiling<=100) → 返回 None, 前端不显示个人带。
+    映射以标准中性 50% 为轴: personal(x)=baseline+(x-50)*(ceiling-floor)/100,
+    再 clamp 到 [floor,ceiling] — baseline 偏离区间中点时高/低档会真实贴顶/贴底。
+    """
+    if not policy or not policy.get("enabled"):
+        return None
+    try:
+        floor = float(policy["floor_pct"])
+        ceiling = float(policy["ceiling_pct"])
+        baseline = float(policy["baseline_pct"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (0 <= floor <= baseline <= ceiling <= 100):
+        return None
+    span = ceiling - floor
+
+    def _project(x) -> float:
+        p = baseline + (float(x) - 50.0) * span / 100.0
+        return round(min(max(p, floor), ceiling), 1)
+
+    out = {
+        "personal_lo": _project(band_lo),
+        "personal_mid": _project(band_mid),
+        "personal_hi": _project(band_hi),
+        "floor": round(floor, 1),
+        "ceiling": round(ceiling, 1),
+        "baseline": round(baseline, 1),
+        "note": _POLICY_NOTE,
+    }
+    md = policy.get("max_drawdown_pct")
+    if md is not None:
+        try:
+            out["max_drawdown_pct"] = float(md)
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 _BLACKSWAN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -182,6 +261,41 @@ def _stats_for(kind: str, key: str, windows: List[str]) -> Optional[dict]:
     return out or None
 
 
+def _bucket_conflict(cycle_buckets: Optional[dict]) -> Optional[dict]:
+    """周期分桶间分歧: 各桶分数按桶权重的加权标准差 + 一句话定性 (仅信息展示)。
+
+    净分是各桶加权和 — 当链上筹码 -0.8 与资金流 +0.6 相互抵消成温和 +0.1 时, 净分
+    掩盖了 regime 冲突。此处量化桶间离散度作为元信号上下文, 绝不回灌评分、不改仓位。
+    离散度是实测量 (加权 σ), 非未标定的置信标量。桶明细缺失/存活桶不足 2 时返回 None。
+    """
+    if not cycle_buckets or not isinstance(cycle_buckets, dict):
+        return None
+    scored = [(name, float(bd["score"]), float(bd["weight"]))
+              for name, bd in cycle_buckets.items()
+              if isinstance(bd, dict) and bd.get("score") is not None
+              and bd.get("weight")]
+    if len(scored) < 2:
+        return None
+    wsum = sum(w for _, _, w in scored)
+    if wsum <= 0:
+        return None
+    mean = sum(s * w for _, s, w in scored) / wsum
+    dispersion = (sum(w * (s - mean) ** 2 for _, s, w in scored) / wsum) ** 0.5
+    top = max(scored, key=lambda t: t[1])
+    bot = min(scored, key=lambda t: t[1])
+    if dispersion < 0.20:
+        level, note = "共识较强", f"桶间共识较强 (σ={dispersion:.2f}), 各桶方向基本一致"
+    elif dispersion < 0.40:
+        level = "存在分歧"
+        note = (f"桶间存在分歧 (σ={dispersion:.2f}): {top[0]} {top[1]:+.2f} 偏多 "
+                f"vs {bot[0]} {bot[1]:+.2f} 偏空")
+    else:
+        level = "分歧显著"
+        note = (f"桶间分歧显著 (σ={dispersion:.2f}), 净分掩盖对立: "
+                f"{top[0]} {top[1]:+.2f} vs {bot[0]} {bot[1]:+.2f}")
+    return {"dispersion": round(dispersion, 3), "level": level, "note": note}
+
+
 def compute_decision(dashboard: dict, history_entries: list) -> dict:
     """
     主入口: 由当前仪表盘快照 + 评分历史 生成量化决策。
@@ -203,7 +317,8 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
     # 若历史为空 (首次冷启动) 用当前分数单点退化
     if not hist_scores:
         hist_scores = [cycle_score]
-    if len(hist_scores) < HYST_CONFIRM * 4:
+    history_short = len(hist_scores) < MIN_RELIABLE_HISTORY
+    if history_short:
         warnings.append(f"评分历史仅 {len(hist_scores)} 天, 滞回状态可信度有限")
 
     seq, pending_idx, pend_days = replay_hysteresis(hist_scores)
@@ -246,7 +361,8 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
     _, t_name, t_pace, t_advice, t_key = TACTICAL_BANDS[t_idx]
 
     # ── 数据质量护栏 ──
-    if dashboard.get("data_synthetic"):
+    synthetic = bool(dashboard.get("data_synthetic"))
+    if synthetic:
         warnings.append("🚨 价格为演示数据, 本决策无效")
     # 低覆盖警示以因子级覆盖率为准 (p1-4): 桶级 coverage 对"桶内因子逐个流失"失明。
     # 现网 dashboard 携带 cycle_buckets/tactical_buckets, 据此复算因子级覆盖率;
@@ -257,10 +373,42 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
     cov_t = factor_coverage_from_buckets(dashboard.get("tactical_buckets"))
     if cov_t is None:
         cov_t = dashboard.get("tactical_coverage")
-    if cov_c is not None and cov_c < 0.5:
+    cov_c_low = cov_c is not None and cov_c < COVERAGE_WARN_THRESHOLD
+    cov_t_low = cov_t is not None and cov_t < COVERAGE_WARN_THRESHOLD
+    if cov_c_low:
         warnings.append(f"周期分因子覆盖率仅 {cov_c:.0%}, 仓位决策可信度低")
-    if cov_t is not None and cov_t < 0.5:
+    if cov_t_low:
         warnings.append(f"战术分因子覆盖率仅 {cov_t:.0%}, 节奏建议可信度低")
+
+    # ── 冻结态 (2026-07): 仅"价格层失效"锁死为一等状态 —— 合成价格 (全源失效) 或
+    # 价格全源陈旧 (>7天)。价格是滚动均线/分位数的地基, 地基坏则仓位数学无意义,
+    # 前端据此把可执行数字置灰、notify 据此堵住陈旧误推送 (见 notify.evaluate_alerts)。
+    # 因子覆盖率保持软告警不升冻结: 避免 Render 冷启动/bitcoin-data 限流下 onchain
+    # 暂灰触发扰民误冻。
+    freeze_reasons = []
+    if synthetic:
+        freeze_reasons.append("价格为演示数据, 仓位数学无效")
+    if dashboard.get("price_stale"):
+        freeze_reasons.append("价格全源陈旧 (滞后>7天), 评分地基失效")
+    frozen = bool(freeze_reasons)
+
+    # ── 置信分级 (三档, 无连续标量): 严格复用上面数据质量警示的同源阈值与文案。
+    # 合成数据→不可靠; 覆盖率/历史缺陷叠加 (≥2) →不可靠, 单一缺陷→存疑; 否则可靠。
+    # (价格陈旧走上面的 frozen 硬状态, 不并入此软分级。)
+    defect_count = sum([cov_c_low or cov_t_low, history_short])
+    if synthetic or defect_count >= 2:
+        conf_level = "不可靠"
+    elif defect_count >= 1:
+        conf_level = "存疑"
+    else:
+        conf_level = "可靠"
+    confidence = {"level": conf_level, "reasons": list(warnings)}
+
+    # ── 桶间分歧 (仅信息): 净分掩盖 regime 冲突时提示, 不改仓位 ──
+    conflict = _bucket_conflict(dashboard.get("cycle_buckets"))
+
+    policy = apply_position_policy(pos_lo, pos_hi, pos_mid,
+                                   _load_position_policy())
 
     stats = _load_band_stats()
     return {
@@ -274,6 +422,9 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
             "raw_band": CYCLE_BANDS[raw_idx][1],
             "raw_differs": raw_idx != held_idx,
             "stats": _stats_for("cycle", held_key, ["90d", "180d", "365d"]),
+            # 个人政策层 (纯叠加 overlay): 启用时并列个人目标带, 未启用时为 None,
+            # 绝不改写上面的 target_lo/hi/mid (band_stats 回测统计仍绑标准映射)
+            "policy": policy,
         },
         # 短期决策 (战术分, 日级变化)
         "tactical": {
@@ -282,6 +433,12 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
         },
         "hysteresis": {"delta": HYST_DELTA, "confirm": HYST_CONFIRM,
                        "history_days": len(hist_scores)},
+        # 冻结态: 价格层失效时前端置灰可执行数字、notify 堵推送 (纯展示/门控, 不改仓位数学)
+        "frozen": frozen,
+        "freeze_reasons": freeze_reasons,
+        # 置信分级 (三档) + 桶间分歧 (加权 σ) — 元信号, 仅展示上下文, 不回灌评分/不改仓位
+        "confidence": confidence,
+        "conflict": conflict,
         # 黑天鹅压力测试参考 (n=11 事后追认样本, 非预测) — 前端换算目标仓位对应组合回撤
         "blackswan_stress": _load_blackswan_stress(),
         "warnings": warnings,

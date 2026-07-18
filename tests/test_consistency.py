@@ -18,7 +18,7 @@ import re
 
 import pytest
 
-from btc_dashboard import decision, scoring, score_history, triggers
+from btc_dashboard import decision, scoring, score_history, triggers, notify
 from backtest import evaluate
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -236,6 +236,72 @@ def test_member_weights_reference_real_members():
         for m, w in weights.items():
             assert m in members, f"「{bucket_name}」的成员权重引用不存在的因子「{m}」"
             assert w > 0
+
+
+# ────────────────────────────────────────────────────────────
+# 置信闸门阈值 ≡ 警示触发阈值 (同源锁) + 冻结态门控 notify 抑制
+# decision 的 confidence 分级 / frozen 状态与 warnings 必须由同一批阈值/判据驱动 —
+# 任一处漂移 (如警示改 0.5、置信仍读旧值) 会让"面板显示警示却仍标可靠"自相矛盾。
+# ────────────────────────────────────────────────────────────
+
+def _hist(n):
+    return [{"date": f"d{i}", "total_score": 0.20} for i in range(n)]
+
+
+def _base_dash(**kw):
+    d = {"total_score": 0.20, "tactical_score": 0.0, "btc_price": 65000.0,
+         "data_synthetic": False, "cycle_coverage": 0.95, "tactical_coverage": 0.95}
+    d.update(kw)
+    return d
+
+
+def test_confidence_coverage_gate_shares_warning_threshold():
+    """覆盖率警示与 confidence 分级共用 decision.COVERAGE_WARN_THRESHOLD (严格 <)。"""
+    thr = decision.COVERAGE_WARN_THRESHOLD
+    at = decision.compute_decision(_base_dash(cycle_coverage=thr), _hist(60))
+    assert not any("覆盖率" in w for w in at["warnings"]), "恰在阈值不应触发警示 (须严格 <)"
+    assert at["confidence"]["level"] == "可靠", "恰在阈值置信仍须可靠 (与警示同源)"
+
+    below = decision.compute_decision(_base_dash(cycle_coverage=thr - 1e-6), _hist(60))
+    assert any("覆盖率" in w for w in below["warnings"]), "略低于阈值须触发覆盖率警示"
+    assert below["confidence"]["level"] != "可靠", "警示触发时置信不得仍标可靠 (阈值漂移)"
+
+
+def test_confidence_history_gate_shares_warning_threshold():
+    """历史深度警示与 confidence 共用 decision.MIN_RELIABLE_HISTORY (=HYST_CONFIRM×4)。"""
+    mn = decision.MIN_RELIABLE_HISTORY
+    assert mn == decision.HYST_CONFIRM * 4
+
+    at = decision.compute_decision(_base_dash(), _hist(mn))
+    assert not any("评分历史" in w for w in at["warnings"])
+    assert at["confidence"]["level"] == "可靠"
+
+    below = decision.compute_decision(_base_dash(), _hist(mn - 1))
+    assert any("评分历史" in w for w in below["warnings"])
+    assert below["confidence"]["level"] != "可靠"
+
+
+def test_frozen_gate_matches_price_layer_and_suppresses_notify():
+    """frozen 判据只锁价格层 (data_synthetic / price_stale), 且 notify 据 frozen 抑制误推送。"""
+    for kw, reason_kw in ((dict(data_synthetic=True), "演示"),
+                          (dict(price_stale=True), "陈旧")):
+        dash = _base_dash(**kw)
+        dec = decision.compute_decision(dash, _hist(60))
+        assert dec["frozen"] is True, f"{kw} 应冻结"
+        assert any(reason_kw in r for r in dec["freeze_reasons"])
+
+        # 构造本应触发周期换档的 prev_state; frozen 态下 notify 必须一条不发
+        dash["decision"] = dec
+        prev = {"cycle_band": "偏多配置", "tactical_band": "等待信号", "last_sent": {}}
+        alerts, _ = notify.evaluate_alerts(dash, prev)
+        assert alerts == [], f"{kw} 冻结态下 notify 未被抑制"
+
+
+def test_low_coverage_not_frozen_soft_only():
+    """因子覆盖率低维持软告警, 不升冻结 (避免冷启动/限流下 onchain 暂灰扰民误冻)。"""
+    dec = decision.compute_decision(
+        _base_dash(cycle_coverage=0.3, tactical_coverage=0.3), _hist(60))
+    assert dec["frozen"] is False and dec["freeze_reasons"] == []
 
 
 # ────────────────────────────────────────────────────────────

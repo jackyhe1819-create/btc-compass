@@ -74,7 +74,10 @@ def evaluate_alerts(dashboard: dict, prev_state: dict,
     new_state = dict(prev_state or {})
     new_state.setdefault("last_sent", {})
 
-    if dashboard.get("data_synthetic") or not decision:
+    # 价格层失效熔断: 合成数据或 decision 冻结态 (合成/价格陈旧) 一律不提醒也不记状态。
+    # frozen 复用 decision.compute_decision 的同源判据 (data_synthetic/price_stale) —
+    # 补堵此前 price_stale 下陈旧分数仍可能推送换档误提醒的缺口。
+    if dashboard.get("data_synthetic") or not decision or decision.get("frozen"):
         return [], new_state
 
     cyc = decision.get("cycle") or {}

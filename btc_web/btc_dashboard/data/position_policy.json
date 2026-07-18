@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "baseline_pct": 80,
+  "floor_pct": 60,
+  "ceiling_pct": 95,
+  "max_drawdown_pct": null,
+  "_note": "个人仓位政策层 (默认关闭)。enabled=true 时决策卡在标准 0-100% 档位旁并列显示你的个人目标带: 把每个档位的 (下限,中值,上限) 以标准中性(50%)为轴, 仿射映射进 [floor_pct, ceiling_pct] 并 clamp — personal = baseline + (标准% - 50) * (ceiling - floor) / 100。字段: baseline_pct = 你的中性/当前基准持仓 (须落在 floor~ceiling 内, 净信号为中性时的目标, 也用于合法性校验); floor_pct = 信念底/税务底, 再看空也不减到其下; ceiling_pct = 集中度上限, 再看多也不超过; max_drawdown_pct = 你的回撤容忍 (仅展示, 不作硬性仓位上限, 尾部无上界故不宜当止损)。免责: band_stats.json 的回测统计 (Sharpe/前瞻收益) 基于标准 0-100% 线性映射标定, 你的自定义区间只改变仓位幅度、不改变方向 — 个人数字是偏好校准, 非回测背书。此为纯叠加 overlay, 不改写决策的原始 target_lo/hi/mid, 也不触碰评分/档位阈值/回测统计。"
+}
