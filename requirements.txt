@@ -1,8 +1,2 @@
-flask==3.1.*
-gunicorn==23.*
-requests>=2.31
-pandas>=2.0
-numpy>=1.24
-yfinance>=0.2.30
-deep_translator>=1.11
-feedparser>=6.0
+# 唯一真源在 btc_web/requirements.txt (render.yaml buildCommand 用它); 此文件仅为在仓库根跑 pip 的便利指针, 勿再手抄依赖以免双份漂移
+-r btc_web/requirements.txt
