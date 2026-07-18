@@ -217,10 +217,15 @@ def _check_probe_trends(base_url, rec):
         if len(hist) < TREND_MIN_HISTORY:
             return
         recent = hist[-TREND_K:]
-        for key, label in (("cycle_coverage", "周期覆盖率"),
-                           ("tactical_coverage", "战术覆盖率")):
-            med = _median([r.get(key) for r in recent])
-            cur = rec.get(key)
+        # 覆盖率趋势口径与即时闸门一致: 因子级优先, 桶级回退 (旧探针记录无因子级字段
+        # 时逐条回退, 随其滚出 TREND_K 窗口后自然纯因子级)。桶级会把整桶存活冒充满覆盖,
+        # 趋势读端也须用因子级才能追踪"桶内因子逐个流失"的滑坡 (Codex 复审 P3)。
+        for f_key, b_key, label in (
+                ("cycle_factor_coverage", "cycle_coverage", "周期覆盖率"),
+                ("tactical_factor_coverage", "tactical_coverage", "战术覆盖率")):
+            med = _median([(r.get(f_key) if r.get(f_key) is not None else r.get(b_key))
+                           for r in recent])
+            cur = rec.get(f_key) if rec.get(f_key) is not None else rec.get(b_key)
             if med is not None and cur is not None and cur < med - TREND_COVERAGE_DROP:
                 _report("WARN", f"{label}趋势劣化: 当前 {cur:.0%} < 近{len(recent)}次中位 "
                                 f"{med:.0%} − {TREND_COVERAGE_DROP:.0%}")
@@ -239,21 +244,9 @@ def _check_probe_trends(base_url, rec):
         pass
 
 
-def probe_runtime(base_url) -> None:
-    print(f"\n[2/2] 运行时探针: {base_url}")
-
-    # 因子桶配置 = 期望存活的因子清单 (从 scoring 导入, 与评分引擎同源)
-    sys.path.insert(0, os.path.join(REPO_ROOT, "btc_web"))
-    from btc_dashboard import scoring, decision  # noqa: E402
-
-    data = _get_dashboard(base_url)
-    if "__error__" in data:
-        hint = ("本地服务未启动? 先 `PORT=5070 python3 btc_web/app.py`, 或用 --live 探测现网"
-                if base_url == LOCAL_URL else "现网不可达")
-        _report("FAIL", f"/api/dashboard 不可用: {data['__error__']} ({hint})")
-        return
-
-    # 数据真实性与基本合理性
+def _check_data_validity(data) -> None:
+    """数据真实性与基本合理性闸门 (纯逻辑, 只 _report; 离线可测)。
+    合成/价格全源陈旧 → FAIL (评分地基失效, 不可据此调仓); 价格与双评分区间兜底。"""
     if data.get("data_synthetic"):
         _report("FAIL", "价格为合成演示数据 — 所有真实价格源均失效")
     elif data.get("price_stale"):
@@ -272,6 +265,23 @@ def probe_runtime(base_url) -> None:
             _report("FAIL", f"{name}异常: {v!r} (应在 [-1, 1])")
         else:
             _report("OK", f"{name} {v:+.3f}")
+
+
+def probe_runtime(base_url) -> None:
+    print(f"\n[2/2] 运行时探针: {base_url}")
+
+    # 因子桶配置 = 期望存活的因子清单 (从 scoring 导入, 与评分引擎同源)
+    sys.path.insert(0, os.path.join(REPO_ROOT, "btc_web"))
+    from btc_dashboard import scoring, decision  # noqa: E402
+
+    data = _get_dashboard(base_url)
+    if "__error__" in data:
+        hint = ("本地服务未启动? 先 `PORT=5070 python3 btc_web/app.py`, 或用 --live 探测现网"
+                if base_url == LOCAL_URL else "现网不可达")
+        _report("FAIL", f"/api/dashboard 不可用: {data['__error__']} ({hint})")
+        return
+
+    _check_data_validity(data)
 
     # 逐因子存活 (以 scoring 桶配置为准绳)
     # 覆盖率闸门优先读因子级 (按成员权重, 桶内逐个流失如实压低); 缺失时回退桶级

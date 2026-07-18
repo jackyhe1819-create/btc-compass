@@ -16,11 +16,12 @@ class _Scoring:
     TACTICAL_BUCKETS = {"t": {"members": ["C"]}}
 
 
-def _fake_data(cov_c=0.95, cov_t=0.9):
+def _fake_data(cov_c=0.95, cov_t=0.9, fcov_c=None, fcov_t=None):
     return {
         "data_source": "test", "data_synthetic": False, "btc_price": 60000,
         "total_score": 0.1, "tactical_score": -0.2,
         "cycle_coverage": cov_c, "tactical_coverage": cov_t,
+        "cycle_factor_coverage": fcov_c, "tactical_factor_coverage": fcov_t,
         "cache_age_s": 100,
         "indicators": {"A": {"value": 1}, "B": {"value": 2}, "C": {"value": 3}},
         "decision": {"cycle": {"band": "标准配置"}, "tactical": {"pace": "正常分批"}},
@@ -28,7 +29,8 @@ def _fake_data(cov_c=0.95, cov_t=0.9):
 
 
 def _make_rec(base_url, **kw):
-    d = _fake_data(**{k: v for k, v in kw.items() if k in ("cov_c", "cov_t")})
+    d = _fake_data(**{k: v for k, v in kw.items()
+                      if k in ("cov_c", "cov_t", "fcov_c", "fcov_t")})
     rec = verify._probe_metrics(base_url, d, d["indicators"], _Scoring)
     rec["score_history_days"] = kw.get("days", 120)
     return rec
@@ -76,6 +78,52 @@ def test_coverage_drop_warns(tmp_path, monkeypatch):
     monkeypatch.setattr(verify, "_results", [])
     verify._check_probe_trends("http://x", _make_rec("http://x", cov_c=0.90))
     assert not [m for lv, m in verify._results if lv == "WARN"]
+
+
+def test_trend_prefers_factor_coverage(tmp_path, monkeypatch):
+    """趋势比较器用因子级优先: 桶级始终 0.95, 但因子级从 0.95 跌到 0.80 → WARN。
+    (桶级掩盖桶内因子逐个流失, 趋势读端须用因子级才追得到滑坡; Codex 复审 P3)"""
+    p = tmp_path / "probe_history.jsonl"
+    monkeypatch.setattr(verify, "PROBE_HISTORY_PATH", str(p))
+    for _ in range(4):
+        verify._record_probe(_make_rec("http://x", cov_c=0.95, fcov_c=0.95))
+    monkeypatch.setattr(verify, "_results", [])
+    # 桶级仍满 (0.95), 只有因子级掉 —— 若读端仍读桶级则漏报。
+    verify._check_probe_trends("http://x", _make_rec("http://x", cov_c=0.95, fcov_c=0.80))
+    assert any("周期覆盖率趋势劣化" in m for lv, m in verify._results if lv == "WARN"), \
+        "因子级覆盖率滑坡被桶级掩盖 — 趋势读端未用因子级"
+
+
+def test_trend_falls_back_to_bucket_when_factor_absent(tmp_path, monkeypatch):
+    """旧探针记录无因子级字段 → 逐条回退桶级, 仍能追踪 (向后兼容)。"""
+    p = tmp_path / "probe_history.jsonl"
+    monkeypatch.setattr(verify, "PROBE_HISTORY_PATH", str(p))
+    for _ in range(4):
+        verify._record_probe(_make_rec("http://x", cov_c=0.95, fcov_c=None))
+    monkeypatch.setattr(verify, "_results", [])
+    verify._check_probe_trends("http://x", _make_rec("http://x", cov_c=0.80, fcov_c=None))
+    assert any("周期覆盖率趋势劣化" in m for lv, m in verify._results if lv == "WARN")
+
+
+def test_price_stale_fails(monkeypatch):
+    """价格全源陈旧 → 数据有效性闸门 FAIL (不可据此调仓)。"""
+    monkeypatch.setattr(verify, "_results", [])
+    verify._check_data_validity({
+        "data_synthetic": False, "price_stale": True, "price_history_lag_days": 12,
+        "btc_price": 60000, "total_score": 0.1, "tactical_score": -0.2,
+    })
+    fails = [m for lv, m in verify._results if lv == "FAIL"]
+    assert any("陈旧" in m for m in fails), f"price_stale 未触发 FAIL: {verify._results}"
+
+
+def test_fresh_price_no_stale_fail(monkeypatch):
+    """对照: 价格新鲜 → 数据源 OK, 无陈旧 FAIL。"""
+    monkeypatch.setattr(verify, "_results", [])
+    verify._check_data_validity({
+        "data_synthetic": False, "price_stale": False, "data_source": "Yahoo",
+        "btc_price": 60000, "total_score": 0.1, "tactical_score": -0.2,
+    })
+    assert not [m for lv, m in verify._results if lv == "FAIL"]
 
 
 def test_base_url_partition(tmp_path, monkeypatch):
