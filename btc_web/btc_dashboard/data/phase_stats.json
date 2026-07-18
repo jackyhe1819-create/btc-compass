@@ -1,6 +1,6 @@
 {
- "generated": "2026-07-16 20:53",
- "window": "2014-06-01 ~ 2026-05-23",
+ "generated": "2026-07-18 09:26",
+ "window": "2014-06-01 ~ 2026-07-17",
  "note": "历史频率统计, 样本内标定 (相位规则与统计同源同史), n=3~4 个周期; 是'该判读历史上的含义'而非校准概率, 非收益承诺",
  "phases": {
   "bubble": {
@@ -19,9 +19,9 @@
      "n": 373
     },
     "365d": {
-     "median_pct": -8.7,
-     "pos_pct": 46.0,
-     "n": 337
+     "median_pct": -10.7,
+     "pos_pct": 45.0,
+     "n": 345
     }
    },
    "top_lead_days": {
@@ -47,16 +47,16 @@
      "n": 736
     },
     "365d": {
-     "median_pct": 57.3,
-     "pos_pct": 67.0,
-     "n": 623
+     "median_pct": 51.5,
+     "pos_pct": 63.0,
+     "n": 670
     }
    }
   },
   "pullback_or_bear": {
    "name": "回调/熊初·待确认",
    "episodes": 10,
-   "days": 359,
+   "days": 369,
    "fwd": {
     "90d": {
      "median_pct": -0.7,
@@ -64,9 +64,9 @@
      "n": 329
     },
     "180d": {
-     "median_pct": 22.6,
-     "pos_pct": 54.0,
-     "n": 251
+     "median_pct": -15.8,
+     "pos_pct": 44.0,
+     "n": 306
     },
     "365d": {
      "median_pct": -19.4,
@@ -82,13 +82,13 @@
   },
   "bear_mid": {
    "name": "熊中·下跌中继",
-   "episodes": 13,
-   "days": 718,
+   "episodes": 14,
+   "days": 763,
    "fwd": {
     "90d": {
-     "median_pct": -16.8,
-     "pos_pct": 22.0,
-     "n": 658
+     "median_pct": -14.9,
+     "pos_pct": 21.0,
+     "n": 713
     },
     "180d": {
      "median_pct": -31.9,

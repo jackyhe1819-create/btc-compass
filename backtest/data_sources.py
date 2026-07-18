@@ -63,11 +63,88 @@ def _cached_text(name: str, fetch_fn, max_age_hours: float = 24.0) -> str:
 # CoinMetrics 社区 CSV
 # ------------------------------------------------------------
 
+# ── 价格新鲜度守卫 (2026-07 裁决级教训) ─────────────────────────
+# 缓存/上游滞后 54 天曾把 LTH占比 候选因子的 post-2024-10 IC 从真实的
+# +0.069 美化成 +0.605, 差点导致错误入桶 (窗口截断系统性高估近期体制表现)。
+# 方法论已入库: 因子裁决前必须先刷新价格数据。守卫三级:
+#   镜像缓存 → 强刷镜像 → CM 社区 API 改道 (上游镜像 2026-07 实测停更 55 天,
+#   与 eth_compass 同款事故) → 仍滞后则拒跑 (BTC_ALLOW_STALE_PRICE=1 可越过)
+PRICE_MAX_LAG_DAYS = 7
+
+_CM_API_METRICS = ("PriceUSD,CapMrktCurUSD,CapMVRVCur,HashRate,IssTotUSD,"
+                   "SplyExNtv,FlowInExNtv,FlowOutExNtv")
+
+
+def price_lag_days(last_date, today=None) -> int:
+    """价格序列末日期距今天数 (纯函数, 供守卫与测试)。"""
+    now = pd.Timestamp(today) if today is not None else pd.Timestamp.now()
+    return int((now.normalize() - pd.Timestamp(last_date).normalize()).days)
+
+
+def freshness_verdict(lag: int, allow_stale: bool = False) -> str:
+    """守卫决策 (纯函数): 'ok' | 'refresh' (须刷新/改道) | 'fail' (拒跑)。
+    allow_stale 仅在改道后仍滞后时把 fail 降级为 ok (带告警照用)。"""
+    if lag <= PRICE_MAX_LAG_DAYS:
+        return "ok"
+    return "ok" if allow_stale else "fail"
+
+
+def _fetch_cm_api_text() -> str:
+    """CM 社区 API 全史 (镜像停更时的改道源), 返回 JSON 行文本。"""
+    url = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
+    params = {"assets": "btc", "metrics": _CM_API_METRICS, "frequency": "1d",
+              "start_time": "2010-01-01", "page_size": "10000"}
+    rows = []
+    next_url, next_params = url, params
+    for _ in range(8):
+        r = requests.get(next_url, params=next_params, timeout=120, headers=_HEADERS)
+        r.raise_for_status()
+        j = r.json() or {}
+        rows.extend(j.get("data") or [])
+        nxt, token = j.get("next_page_url"), j.get("next_page_token")
+        if nxt:
+            next_url, next_params = nxt, None
+        elif token:
+            next_params = {**params, "next_page_token": token}
+        else:
+            break
+    if len(rows) < 3000:
+        raise RuntimeError(f"CM 社区 API 仅返回 {len(rows)} 行")
+    return json.dumps(rows)
+
+
+def _cm_api_frame() -> pd.DataFrame:
+    """CM API JSON → 与镜像同构的 DataFrame。"""
+    rows = json.loads(_cached_text("coinmetrics_btc_api.json",
+                                   _fetch_cm_api_text, max_age_hours=24))
+    recs = {}
+    for row in rows:
+        try:
+            ts = pd.Timestamp(row["time"][:10])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        def _f(key):
+            v = row.get(key)
+            try:
+                return float(v) if v is not None else float("nan")
+            except (TypeError, ValueError):
+                return float("nan")
+
+        recs[ts] = {"price": _f("PriceUSD"), "mcap": _f("CapMrktCurUSD"),
+                    "mvrv": _f("CapMVRVCur"), "hashrate": _f("HashRate"),
+                    "iss_usd": _f("IssTotUSD"), "sply_ex": _f("SplyExNtv"),
+                    "flow_in_ex": _f("FlowInExNtv"), "flow_out_ex": _f("FlowOutExNtv")}
+    out = pd.DataFrame.from_dict(recs, orient="index").sort_index()
+    return out[out["price"] > 0]
+
+
 def fetch_coinmetrics() -> pd.DataFrame:
     """
     返回日度 DataFrame(index=date):
       price, mcap, mvrv, hashrate, iss_usd, sply_ex(交易所BTC存量),
       flow_in_ex, flow_out_ex
+    末尾经价格新鲜度守卫: 镜像滞后 >7 天时强刷→CM API 改道→仍滞后拒跑。
     """
     def _fetch():
         r = requests.get(
@@ -91,6 +168,40 @@ def fetch_coinmetrics() -> pd.DataFrame:
     out["flow_in_ex"] = pd.to_numeric(df["FlowInExNtv"], errors="coerce")
     out["flow_out_ex"] = pd.to_numeric(df["FlowOutExNtv"], errors="coerce")
     out = out[out["price"] > 0]
+
+    # ── 新鲜度守卫: 三级 (强刷镜像 → CM API 改道 → 拒跑) ──
+    lag = price_lag_days(out.index[-1])
+    if lag > PRICE_MAX_LAG_DAYS:
+        print("=" * 60)
+        print(f"🚨 价格数据末日期 {out.index[-1].date()} 滞后 {lag} 天 "
+              f"(>{PRICE_MAX_LAG_DAYS}) — 窗口截断会系统性美化近期体制 IC")
+        print("=" * 60)
+        try:
+            os.remove(_cache_path("coinmetrics_btc.csv"))
+        except OSError:
+            pass
+        try:
+            r2 = requests.get(
+                "https://raw.githubusercontent.com/coinmetrics/data/master/csv/btc.csv",
+                headers=_HEADERS, timeout=180)
+            r2.raise_for_status()
+            df2 = pd.read_csv(io.StringIO(r2.text), parse_dates=["time"])
+            mirror_last = df2["time"].max().tz_localize(None)
+        except Exception:
+            mirror_last = out.index[-1]
+        if price_lag_days(mirror_last) > PRICE_MAX_LAG_DAYS:
+            print(f"↪️ 镜像强刷后仍滞后 (上游停更, 末={pd.Timestamp(mirror_last).date()}) "
+                  f"— 改道 CM 社区 API")
+            api = _cm_api_frame()
+            lag_api = price_lag_days(api.index[-1])
+            if freshness_verdict(lag_api,
+                                 os.environ.get("BTC_ALLOW_STALE_PRICE") == "1") == "fail":
+                raise RuntimeError(
+                    f"价格数据经三级刷新仍滞后 {lag_api} 天 (末 {api.index[-1].date()}) "
+                    f"— 拒跑以防近期 IC 被美化; 确要带旧数据跑请设 BTC_ALLOW_STALE_PRICE=1 "
+                    f"且在报告声明数据截止日")
+            print(f"✅ 改道成功: 数据截止 {api.index[-1].date()} (滞后 {lag_api} 天)")
+            return api
     return out
 
 
