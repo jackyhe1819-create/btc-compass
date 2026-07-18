@@ -37,6 +37,11 @@ from .scoring import (
     CYCLE_BUCKETS, TACTICAL_BUCKETS, _compute_bucket_scores,
     cycle_recommendation, PERCENTILE_WINDOW,
 )
+# Tier-2 共享内核单一事实源 (滚动分位 / 极值保底 / σ 窗常量), 与 backtest/factors.py 同源
+from .factor_kernels import (
+    rolling_percentile_score, extreme_combine,
+    MVRV_SIGMA_WINDOW, MVRV_SIGMA_MIN_HISTORY,
+)
 from .score_history import _load_history, _save_history, history_write_lock
 from .options import fetch_dvol_history
 
@@ -54,10 +59,12 @@ _SRC_TTL = 7 * 24 * 3600   # 数据源磁盘缓存 7 天
 #   回填窗含该段约 9 个月, 历史随新口径重建
 # v6 (2026-07-16): 链上筹码桶移除 交易所余额 (ETF 时代常亮看多灯 + 与ETF净流入双重
 #   计数, 见 scoring.CYCLE_BUCKETS 注) — 桶均值逐日变化, 历史整段重建
-_MARKER = "score_history_backfilled.v6.marker"
+# v7 (2026-07-18): MVRV-Z 绝对阈值腿 σ 口径 expanding(365)→rolling(730)+不足回退
+#   (factor_kernels 收敛, 对齐现网 CM-primary 与 backtest) — 重建历史与新口径对齐
+_MARKER = "score_history_backfilled.v7.marker"
 _OLD_MARKERS = ("score_history_backfilled.marker", "score_history_backfilled.v2.marker",
                 "score_history_backfilled.v3.marker", "score_history_backfilled.v4.marker",
-                "score_history_backfilled.v5.marker")
+                "score_history_backfilled.v5.marker", "score_history_backfilled.v6.marker")
 
 
 # ============================================================
@@ -326,38 +333,24 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
     # ── CM 派生: MVRV-Z / NUPL / Puell / 净流7d (与 backtest 同公式) ──
     # 2026-07 审查修复: MVRV-Z/NUPL/Puell 改为与现网 _pct_floor_score 同口径的
     # "4年分位为主 + 绝对阈值极值保底" 混合评分 (旧版只有纯绝对阈值, 与实时口径漂移)。
-    # 分位/保底两条腿与 backtest/factors.py 完全同源:
-    #   MVRV-Z: 分位腿=rolling(730)σ 派生序列, 保底腿=全历史扩张σ 绝对阈值
+    # 分位/保底两条腿共用 factor_kernels 的 rolling_percentile_score / extreme_combine,
+    # 与 backtest/factors.py 完全同源:
+    #   MVRV-Z: 两腿同套在 rolling(730)σ 派生序列上 (730σ 不足逐点回退全历史扩张σ)
     #   NUPL / Puell: 分位腿与保底腿同一序列
     netflow7 = None
     mvrvz_sc = nupl_sc = puell_sc = None   # 预合成的逐日评分 {date: score}
     cm_price_s = None
-
-    def _rolling_pct_score(series: pd.Series) -> pd.Series:
-        """复刻 scoring._percentile_score 的滚动 4 年分位评分 (点时序, 无前视)"""
-        s = series.dropna()
-        if s.empty:
-            return pd.Series(np.nan, index=series.index)
-        minp = PERCENTILE_WINDOW // 4
-        r = s.rolling(PERCENTILE_WINDOW, min_periods=minp).rank(method="min")
-        n = s.rolling(PERCENTILE_WINDOW, min_periods=minp).count()
-        return ((0.5 - (r - 1) / n) * 2).reindex(series.index)
-
-    def _extreme_combine(pct: pd.Series, abs_: pd.Series) -> pd.Series:
-        """复刻 indicators_v2._pct_floor_score: 分位为主, 绝对阈值做极值保底"""
-        out = pct.copy()
-        both = pct.notna() & abs_.notna()
-        use_abs = both & (abs_.abs() > pct.abs())
-        out[use_abs] = abs_[use_abs]
-        return out.where(pct.notna(), abs_)
 
     if cm:
         cm_idx = pd.to_datetime(cm["dates"])
         mc = pd.Series(cm["mcap"], index=cm_idx, dtype=float)
         mvr = pd.Series(cm["mvrv"], index=cm_idx, dtype=float).replace(0, np.nan)
         rc = mc / mvr
-        z_s = (mc - rc) / mc.expanding(min_periods=365).std()
-        z730_s = (mc - rc) / mc.rolling(730).std()
+        # 绝对腿与分位腿必须同源: 主用 rolling(730)σ, 不足回退全历史扩张σ(min_periods=365)
+        # (2026-07 修复: 旧版绝对腿误用 expanding(365)σ, 与现网/backtest 的 730σ 口径漂移)
+        z730_s = (mc - rc) / mc.rolling(MVRV_SIGMA_WINDOW).std()
+        z_exp_s = (mc - rc) / mc.expanding(min_periods=MVRV_SIGMA_MIN_HISTORY).std()
+        z_abs_s = z730_s.where(z730_s.notna(), z_exp_s)
         nupl_s = 1 - 1 / mvr
         iss = pd.Series(cm["iss"], index=cm_idx, dtype=float)
         puell_s = iss / iss.rolling(365).mean()
@@ -369,14 +362,14 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
             sub = s.tail(n).dropna()
             return {ts.strftime("%Y-%m-%d"): float(v) for ts, v in sub.items()} or None
 
-        mvrvz_sc = _tail_dict(_extreme_combine(
-            _rolling_pct_score(z730_s),
-            z_s.map(_band_mvrv_z, na_action="ignore")))
-        nupl_sc = _tail_dict(_extreme_combine(
-            _rolling_pct_score(nupl_s),
+        mvrvz_sc = _tail_dict(extreme_combine(
+            rolling_percentile_score(z730_s),
+            z_abs_s.map(_band_mvrv_z, na_action="ignore")))
+        nupl_sc = _tail_dict(extreme_combine(
+            rolling_percentile_score(nupl_s),
             nupl_s.map(_band_nupl, na_action="ignore")))
-        puell_sc = _tail_dict(_extreme_combine(
-            _rolling_pct_score(puell_s),
+        puell_sc = _tail_dict(extreme_combine(
+            rolling_percentile_score(puell_s),
             puell_s.map(_band_puell, na_action="ignore")))
         netflow7 = _tail_dict(netflow7_s)
         cm_price_s = pd.Series(cm["price"], index=cm_idx, dtype=float).dropna()

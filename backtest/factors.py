@@ -24,7 +24,11 @@ _BTC_WEB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 sys.path.insert(0, _BTC_WEB)
 from btc_dashboard.core import (GENESIS_DATE, AHR999_A, AHR999_B, HALVING_DATES,  # noqa: E402
                                 halving_band)
-from btc_dashboard.scoring import PERCENTILE_WINDOW  # noqa: E402
+# Tier-2 共享内核单一事实源 (滚动分位 / 极值保底 / σ·分位窗常量), 与 backfill.py 同源。
+# extreme_combine 保留本模块内 _extreme_combine 旧名, 减小改动面。
+from btc_dashboard.factor_kernels import (rolling_percentile_score,  # noqa: E402,F401
+                                          extreme_combine as _extreme_combine,
+                                          MVRV_SIGMA_WINDOW, MVRV_SIGMA_MIN_HISTORY)
 
 
 # ------------------------------------------------------------
@@ -44,39 +48,6 @@ def _step_score(series: pd.Series, edges, scores) -> pd.Series:
     v = series[mask]
     idx = np.searchsorted(np.asarray(edges, dtype=float), v.values, side="right")
     out.loc[mask] = np.asarray(scores, dtype=float)[idx]
-    return out
-
-
-def rolling_percentile_score(series: pd.Series,
-                             window: int = PERCENTILE_WINDOW) -> pd.Series:
-    """
-    复刻 scoring._percentile_score:
-      pct = (窗口内严格小于当前值的占比); score = (0.5 - pct) * 2
-    现网要求 len(非NaN) >= window//4 (=365), 再取 tail(window)。
-    rank(method='min') - 1 恰为"严格小于"的个数, 与现网逐日一致。
-    """
-    s = series.dropna()
-    if s.empty:
-        return pd.Series(np.nan, index=series.index)
-    minp = window // 4
-    r = s.rolling(window, min_periods=minp).rank(method="min")
-    n = s.rolling(window, min_periods=minp).count()
-    pct = (r - 1) / n
-    score = (0.5 - pct) * 2
-    return score.reindex(series.index)
-
-
-def _extreme_combine(pct: pd.Series, abs_: pd.Series) -> pd.Series:
-    """
-    复刻 indicators_v2._pct_floor_score 的合成规则:
-    分位数分为主, 绝对阈值分做极值保底 (逐日取 |·| 更大者)。
-    一侧 NaN 时自动用另一侧。
-    """
-    out = pct.copy()
-    both = pct.notna() & abs_.notna()
-    use_abs = both & (abs_.abs() > pct.abs())
-    out[use_abs] = abs_[use_abs]
-    out = out.where(pct.notna(), abs_)
     return out
 
 
@@ -138,8 +109,9 @@ def cycle_factor_scores(cm: pd.DataFrame,
     # 对齐现网 CM 缺失→bd 备源的降级语义。   [calc_mvrv_z 阈值 0/1/3/5]
     mcap = cm["mcap"]
     rcap = mcap / cm["mvrv"]
-    mvrv_z_730 = (mcap - rcap) / mcap.rolling(730).std()
-    mvrv_z_exp = (mcap - rcap) / mcap.expanding(min_periods=365).std()  # 730σ 不足时的备源
+    mvrv_z_730 = (mcap - rcap) / mcap.rolling(MVRV_SIGMA_WINDOW).std()
+    # 730σ 不足时的备源: 全历史扩张 std (min_periods=365)
+    mvrv_z_exp = (mcap - rcap) / mcap.expanding(min_periods=MVRV_SIGMA_MIN_HISTORY).std()
     mvrv_z_abs = mvrv_z_730.where(mvrv_z_730.notna(), mvrv_z_exp)
     out["MVRV-Z"] = _extreme_combine(
         rolling_percentile_score(mvrv_z_730),
