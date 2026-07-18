@@ -394,7 +394,7 @@ def run_dashboard() -> DashboardResult:
             from .triggers import compute_trigger_levels
             trigger_levels = compute_trigger_levels(df, indicators, current_price)
         except Exception as e:  # Keep broad: 附属面板任何异常不影响主评分。
-            logger.warning("触发价位表计算失败: %s", e)
+            print(f"⚠️ 触发价位表计算失败: {e}")
 
     result = DashboardResult(
         timestamp=datetime.now(),
