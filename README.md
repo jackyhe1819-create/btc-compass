@@ -58,7 +58,7 @@
 
 ```bash
 pip install -r btc_web/requirements.txt
-cd btc_web && python3 app.py   # http://localhost:5050
+PORT=5070 python3 btc_web/app.py   # http://localhost:5070
 ```
 
 ## 部署（Render）

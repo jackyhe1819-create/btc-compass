@@ -16,4 +16,9 @@ services:
         sync: false
       - key: SERVERCHAN_SENDKEY     # Server酱³ SendKey → 个人微信
         sync: false
+      # BlockBeats 快讯签名凭据 (只读公开新闻 GET); 不设则回退代码内置 demo 键, 设置即可轮换
+      - key: BLOCKBEATS_APP_KEY
+        sync: false
+      - key: BLOCKBEATS_APP_SECRET
+        sync: false
     plan: free

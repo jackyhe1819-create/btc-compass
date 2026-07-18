@@ -1816,7 +1816,7 @@ function renderCryptoNews(news) {
                 </a>
                 <span class="news-flash-time">${escapeHtml(item.time)}</span>
             </div>
-            ${summary ? `<div class="news-flash-summary"><div class="news-flash-summary-inner">${summary}</div></div>` : ''}
+            ${summary ? `<div class="news-flash-summary"><div class="news-flash-summary-inner">${escapeHtml(summary)}</div></div>` : ''}
         </div>`;
     }).join('');
 
@@ -2130,14 +2130,14 @@ function renderCryptoCalendar(events) {
     container.innerHTML = events.map(item => `
         <div class="calendar-item" style="margin-bottom: 10px; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 8px;">
             <div style="color: var(--accent-btc); font-weight: 500;">
-                ${item.icon || '📅'} ${item.event || item.title || '未知事件'}
-                ${item.source ? `<span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 8px;">[${item.source}]</span>` : ''}
+                ${escapeHtml(item.icon || '📅')} ${escapeHtml(item.event || item.title || '未知事件')}
+                ${item.source ? `<span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 8px;">[${escapeHtml(item.source)}]</span>` : ''}
             </div>
             <div style="margin-top: 4px; font-size: 0.85rem; color: var(--text-secondary);">
-                ${item.status || item.description || ''}
+                ${escapeHtml(item.status || item.description || '')}
             </div>
             <div style="margin-top: 4px; font-size: 0.75rem; color: var(--text-muted);">
-                ${item.date || ''} ${item.type ? '· ' + item.type : ''} ${item.impact ? '· 影响: ' + item.impact : ''}
+                ${escapeHtml(item.date || '')} ${item.type ? '· ' + escapeHtml(item.type) : ''} ${item.impact ? '· 影响: ' + escapeHtml(item.impact) : ''}
             </div>
         </div>
     `).join('');

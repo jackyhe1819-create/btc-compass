@@ -4,6 +4,7 @@ gunicorn==23.*
 requests>=2.31,<3
 pandas>=2.0,<3
 numpy>=1.24,<3
-yfinance>=0.2.30,<2
+# 本机/生产实测已在 yfinance 1.x (1.1.0); 下界抬至 1 锁大版本 — 原 0.2.30 门槛远低于实际运行版, 破坏性变更也在 0.2.x 内部发过, <2 才是有效护栏
+yfinance>=1,<2
 deep_translator>=1.11,<2
 feedparser>=6.0,<7

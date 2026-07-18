@@ -31,6 +31,9 @@ def _bb_signed_headers(method: str, path: str, query: dict = None, body=None) ->
     """为 BlockBeats v2 API 生成 HMAC-SHA256 签名头。"""
     import hashlib, hmac, time as _time, string, random, json as _json, os as _os
 
+    # 内置凭据为服务商 demo 键: 只用于对 BlockBeats v2 快讯做只读公开新闻 GET 签名
+    # (无账户/资金/写操作权限), 非机密。生产可用 BLOCKBEATS_APP_KEY / BLOCKBEATS_APP_SECRET
+    # 环境变量覆盖轮换 (见 render.yaml, sync:false)。
     APP_KEY = _os.environ.get("BLOCKBEATS_APP_KEY", "bb_demo_app")
     APP_SECRET = _os.environ.get("BLOCKBEATS_APP_SECRET", "bb_demo_secret_2026_01")
 
