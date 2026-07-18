@@ -160,9 +160,13 @@ def record_score_snapshot(dashboard: dict, cache_dir: str):
         "recommendation": dashboard.get("recommendation", ""),
         "tactical_score": round(float(dashboard.get("tactical_score", 0)), 4),
         # 因子覆盖率审计字段: 不同日期的分数可能由不同因子集合构成 (失败剔除重归一),
-        # 记录覆盖率使历史曲线的纵向可比性可核查 (2026-07)
+        # 记录覆盖率使历史曲线的纵向可比性可核查 (2026-07)。
+        # 桶级 (整桶存活即算满) 为兼容旧消费者保留; 因子级 (按成员权重, 戳穿"桶内逐个流失"
+        # 盲区) 为新消费者首选 — 桶级会把少数因子驱动的评分冒充满覆盖 (Codex 复审 P2)。
         "cycle_coverage": dashboard.get("cycle_coverage"),
         "tactical_coverage": dashboard.get("tactical_coverage"),
+        "cycle_factor_coverage": dashboard.get("cycle_factor_coverage"),
+        "tactical_factor_coverage": dashboard.get("tactical_factor_coverage"),
         # 决策配置身份戳: 记录当日快照由哪套档位/权重/滞回配置产出, 使历史曲线上的
         # regime-shift 可区分行情 vs 配置漂移 (2026-07); 与 coverage 戳同构。
         "config_hash": config_fingerprint(),
