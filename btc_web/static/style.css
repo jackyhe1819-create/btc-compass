@@ -3093,6 +3093,125 @@ body::before {
 }
 .decision-footnote { margin-top: 10px; font-size: 0.68rem; color: var(--text-muted); }
 
+/* 数据质量徽标 (三档配色) + 桶间分歧行 (元信号, 仅展示上下文) */
+.decision-quality-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin-bottom: 10px;
+    font-size: 0.72rem;
+}
+.decision-quality {
+    font-weight: 700;
+    border-radius: 8px;
+    padding: 2px 9px;
+    border: 1px solid var(--border-color);
+    cursor: default;
+}
+.q-ok   { color: var(--accent-green);  background: color-mix(in srgb, var(--accent-green) 12%, transparent);  border-color: color-mix(in srgb, var(--accent-green) 30%, transparent); }
+.q-warn { color: var(--accent-yellow); background: color-mix(in srgb, var(--accent-yellow) 14%, transparent); border-color: color-mix(in srgb, var(--accent-yellow) 32%, transparent); }
+.q-bad  { color: var(--accent-red);    background: color-mix(in srgb, var(--accent-red) 12%, transparent);    border-color: color-mix(in srgb, var(--accent-red) 32%, transparent); }
+.decision-conflict { color: var(--text-secondary); cursor: default; }
+.decision-conflict b { font-weight: 700; padding: 1px 6px; border-radius: 6px; }
+.decision-conflict-sigma { color: var(--text-muted); font-size: 0.66rem; }
+
+/* 冻结横幅 + 置灰可执行数字 (价格层失效) */
+.decision-frozen-banner {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--accent-blue, #4a90d9) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-blue, #4a90d9) 34%, transparent);
+    border-radius: 10px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+}
+.decision-target.is-frozen { color: var(--text-muted); opacity: 0.5; }
+.decision-action.is-frozen { color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 12%, transparent); opacity: 0.6; }
+
+/* 数据质量软闸门: 抑制换档动作的呈现 (区别于滞回维持) */
+.decision-action.gate {
+    color: var(--accent-orange);
+    background: color-mix(in srgb, var(--accent-orange) 14%, transparent);
+    white-space: normal;
+}
+.decision-pending.gate-note { color: var(--accent-orange); }
+
+/* 决策卡评分行 (当前周期分 + 较昨日 Δ) */
+.decision-scoreline { font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 6px; }
+.decision-scoreline b { color: var(--text-primary); }
+
+/* 三主因归因行 */
+.decision-attr {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+}
+.decision-attr-chip {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1px 7px;
+    white-space: nowrap;
+    cursor: default;
+}
+
+/* 个人政策层 overlay (偏好校准, 非回测背书) */
+.decision-policy {
+    margin: 4px 0 10px;
+    padding: 10px 12px;
+    border: 1px dashed color-mix(in srgb, var(--accent-btc) 40%, var(--border-color));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent-btc) 5%, transparent);
+}
+.decision-policy-head {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.decision-policy-tag {
+    font-size: 0.62rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1px 6px;
+}
+.decision-policy-band { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.decision-policy-range { font-size: 1.4rem; font-weight: 800; color: var(--accent-btc); line-height: 1; white-space: nowrap; }
+.decision-policy-range small { font-size: 0.8rem; font-weight: 600; }
+.decision-policy-mid { font-size: 0.78rem; color: var(--text-secondary); font-weight: 600; }
+.decision-policy-scale { font-size: 0.68rem; color: var(--text-muted); margin-bottom: 8px; }
+.decision-policy-input-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.74rem;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+.decision-policy-input-row input {
+    width: 64px;
+    padding: 3px 6px;
+    font-size: 0.8rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-glass);
+    color: var(--text-primary);
+}
+.decision-policy-hint { color: var(--text-muted); font-size: 0.7rem; }
+.decision-policy-note { font-size: 0.66rem; color: var(--text-muted); line-height: 1.5; margin-top: 4px; }
+.decision-policy-note.muted { opacity: 0.85; }
+
 /* BTC 期权 · 波动率与情绪 (DVOL/偏斜/PC/期限/最大痛点) */
 .opt-hero { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin:6px 0 4px; }
 .opt-hero-label { font-size:0.78rem; color:var(--text-secondary); }

@@ -482,8 +482,9 @@ function renderDashboard(data) {
     // 更新 DAT 动态卡片中的 mNAV
     renderDatMNAV(data.indicators['MSTR mNAV']);
 
-    // 渲染今日量化决策面板
-    renderDecisionPanel(data.decision);
+    // 渲染今日量化决策面板 (传入完整 payload 供决策卡读 cycle_buckets/total_score)
+    _lastDashData = data;
+    renderDecisionPanel(data.decision, data);
     renderTriggerLevels(data.trigger_levels);
     renderCyclePhase(data.cycle_phase);
     renderHorizonGuide(data);
@@ -951,20 +952,132 @@ function renderTriggerLevels(tl) {
         <div style="color:var(--text-muted); font-size:0.7rem; margin-top:6px;">${(tl.meta && tl.meta.note) || ''}</div>`;
 }
 
+// 决策卡跨请求状态：仪表盘 payload (供决策卡读 cycle_buckets/total_score) +
+// 综合评分较昨日 Δ (来自 /api/score-history changes, 首屏晚于决策卡到达 → 到货后就地回填)
+let _lastDashData = null;
+let _cycleScoreDelta = null;   // {delta, base_date} | null
+
+const POLICY_HOLDING_KEY = 'btc-compass-holding-pct';
+
+function _readPolicyHolding() {
+    const raw = localStorage.getItem(POLICY_HOLDING_KEY);
+    if (raw === null || raw === '') return null;
+    const v = Number(raw);
+    return Number.isFinite(v) ? v : null;
+}
+
+// 当前持仓 → 与个人目标中值的差额 + 分批建议 (纯执行辅助, 非回测背书; 分批档为执行卫生启发式)
+function _policyHoldingHint(mid, holding) {
+    if (holding === null) return '输入当前持仓 → 显示与个人目标中值的差额与分批建议';
+    const diff = +(mid - holding).toFixed(1);
+    if (Math.abs(diff) < 0.5) return `≈ 已在个人目标中值 (${mid}%) 附近, 无需调整`;
+    const dir = diff > 0 ? '加仓' : '减仓';
+    const mag = Math.abs(diff);
+    const batches = mag <= 3 ? 1 : (mag <= 8 ? 2 : 3);
+    const batchTxt = batches === 1 ? '一次到位' : `分 ${batches} 批, 每批约 ${+(mag / batches).toFixed(1)}%`;
+    return `目标中值 ${mid}% · 需${dir} ${mag}% (${batchTxt})`;
+}
+
+function wirePolicyHoldingInput(policy) {
+    const input = document.getElementById('policyHoldingInput');
+    const hint = document.getElementById('policyHoldingHint');
+    if (!input || !hint || !policy) return;
+    const mid = policy.personal_mid;
+    const cur = _readPolicyHolding();
+    if (cur !== null) input.value = cur;
+    hint.textContent = _policyHoldingHint(mid, cur);
+    input.addEventListener('input', () => {
+        const raw = input.value.trim();
+        if (raw === '') { localStorage.removeItem(POLICY_HOLDING_KEY); hint.textContent = _policyHoldingHint(mid, null); return; }
+        const v = Number(raw);
+        if (!Number.isFinite(v)) { hint.textContent = '请输入 0–100 的数字'; return; }
+        const clamped = Math.min(Math.max(v, 0), 100);
+        localStorage.setItem(POLICY_HOLDING_KEY, String(clamped));
+        hint.textContent = _policyHoldingHint(mid, clamped);
+    });
+}
+
+// 个人政策层 overlay: policy 为 null (position_policy.json enabled:false) 时不渲染 → 零变化
+function buildPolicyBlock(c) {
+    const p = c.policy;
+    if (!p) return '';
+    return `
+        <div class="decision-policy">
+            <div class="decision-policy-head">👤 个人目标带 <span class="decision-policy-tag">偏好校准 · 非回测背书</span></div>
+            <div class="decision-policy-band">
+                <span class="decision-policy-range">${p.personal_lo}–${p.personal_hi}<small>%</small></span>
+                <span class="decision-policy-mid">中值 ${p.personal_mid}%</span>
+            </div>
+            <div class="decision-policy-scale">操作区间 ${p.floor}%（信念底）— ${p.ceiling}%（集中度上限）· 中性基准 ${p.baseline}%</div>
+            <div class="decision-policy-input-row">
+                <label>当前持仓 <input type="number" id="policyHoldingInput" min="0" max="100" step="1" placeholder="%" inputmode="decimal"> %</label>
+                <span id="policyHoldingHint" class="decision-policy-hint"></span>
+            </div>
+            <div class="decision-policy-note">${escapeHtml(p.note)}</div>
+            <div class="decision-policy-note muted">标准 0–100% 档位 ${c.target_lo}–${c.target_hi}% 承载 band_stats 回测统计; 个人数字为偏好校准, 两数并列参考。</div>
+        </div>`;
+}
+
+// 三主因归因行 (建议8): 客户端按 |bucket.score × bucket.weight| 取 top3 并标方向, 桶级不下钻逐因子
+function buildCycleAttribution(buckets) {
+    if (!buckets || typeof buckets !== 'object') return '';
+    const items = Object.entries(buckets)
+        .filter(([, b]) => b && typeof b.score === 'number' && typeof b.weight === 'number')
+        .map(([name, b]) => ({ name, score: b.score, contrib: b.score * b.weight }))
+        .filter(it => Math.abs(it.contrib) > 1e-9)
+        .sort((a, b) => Math.abs(b.contrib) - Math.abs(a.contrib))
+        .slice(0, 3);
+    if (!items.length) return '';
+    const chips = items.map(it => {
+        const bull = it.score > 0;
+        const col = bull ? 'var(--accent-green)' : 'var(--accent-red)';
+        return `<span class="decision-attr-chip" style="color:${col};" title="桶贡献 ${it.contrib >= 0 ? '+' : ''}${it.contrib.toFixed(3)} (分×权重)">${escapeHtml(it.name)} ${it.score > 0 ? '+' : ''}${it.score.toFixed(2)} ${bull ? '拉动' : '拖累'}</span>`;
+    }).join(' ');
+    return `<div class="decision-attr">主因 · ${chips}</div>`;
+}
+
+// 决策卡评分行: 当前周期分 + 较昨日 Δ。Δ 可能晚于决策卡到达, 由 score-history 回调再就地填充。
+function updateDecisionScoreDelta() {
+    const el = document.getElementById('decisionScoreLine');
+    if (!el) return;
+    const score = _lastDashData && _lastDashData.total_score;
+    if (typeof score !== 'number') { el.innerHTML = ''; return; }
+    const scoreStr = (score > 0 ? '+' : '') + score.toFixed(2);
+    let deltaHtml = '';
+    const cd = _cycleScoreDelta;
+    if (cd && typeof cd.delta === 'number') {
+        const flat = Math.abs(cd.delta) < 0.005;
+        const up = cd.delta > 0;
+        const arrow = flat ? '→' : (up ? '↑' : '↓');
+        const col = flat ? 'var(--text-muted)' : (up ? 'var(--accent-green)' : 'var(--accent-red)');
+        deltaHtml = ` · <span style="color:${col};" title="基准 ${escapeHtml(cd.base_date || '')}">较昨日 ${up && !flat ? '+' : ''}${cd.delta.toFixed(2)} ${arrow}</span>`;
+    }
+    el.innerHTML = `当前周期分 <b>${scoreStr}</b>${deltaHtml}`;
+}
+
 /**
  * 今日量化决策面板：长期仓位（滞回换档）+ 短期执行节奏 + 回测分档统计
+ * 元信号 (confidence/conflict/frozen/policy) 只做展示与门控, 绝不改写 target/仓位数学。
  */
-function renderDecisionPanel(d) {
+function renderDecisionPanel(d, dash) {
     const section = document.getElementById('decisionSection');
     if (!section) return;
     if (!d || !d.cycle) { section.style.display = 'none'; return; }
     section.style.display = '';
+    dash = dash || _lastDashData || {};
 
     const c = d.cycle, t = d.tactical;
 
     // 动作 badge：加仓绿 / 减仓红 / 维持中性
     const actionCls = { increase: 'up', decrease: 'down', hold: 'hold' }[c.action_type] || 'hold';
     const actionIcon = { increase: '↑', decrease: '↓', hold: '—' }[c.action_type] || '—';
+
+    // 数据质量门控: frozen 硬冻结 (价格层失效) > 不可靠软闸门 (数据质量抑制换档动作)。
+    // 两者均只抑制"可执行数字/动作"的呈现, target 档位照常显示 (慢变配置)。
+    const isFrozen = !!d.frozen;
+    const conf = d.confidence || {};
+    const dataGate = !isFrozen && conf.level === '不可靠'
+        && (c.action_type === 'increase' || c.action_type === 'decrease');
 
     // 分档回测统计 chips（中位数 + 胜率）
     const statChips = (stats, windows) => {
@@ -977,31 +1090,80 @@ function renderDecisionPanel(d) {
         }).join('');
     };
 
-    // 滞回状态说明
+    // 滞回状态说明 (信号维度: 越过缓冲才换档) — 与数据质量闸门 (数据维度) 正交, 文案区分
     let hystNote = '';
     if (c.pending) {
-        hystNote = `<div class="decision-pending">⏳ ${c.pending.note}</div>`;
+        hystNote = `<div class="decision-pending">⏳ ${escapeHtml(c.pending.note)}</div>`;
     } else if (c.raw_differs) {
-        hystNote = `<div class="decision-pending muted">滞回防抖：评分档位「${c.raw_band}」未越过 ±0.05 边界，目标仓位不变</div>`;
+        hystNote = `<div class="decision-pending muted">滞回防抖：评分档位「${escapeHtml(c.raw_band)}」未越过 ±0.05 边界，目标仓位不变</div>`;
     }
+
+    // 数据质量徽标 (三档配色) + 桶间分歧行
+    const confClsMap = { '可靠': 'ok', '存疑': 'warn', '不可靠': 'bad' };
+    const confCls = confClsMap[conf.level] || 'ok';
+    const confReasons = (conf.reasons && conf.reasons.length) ? conf.reasons.join('; ') : '各数据质量闸门通过';
+    const qualityBadge = `<span class="decision-quality q-${confCls}" title="${escapeHtml(confReasons)}">数据质量 · ${escapeHtml(conf.level || '可靠')}</span>`;
+
+    let conflictRow = '';
+    const cf = d.conflict;
+    if (cf) {
+        const cfClsMap = { '共识较强': 'ok', '存在分歧': 'warn', '分歧显著': 'bad' };
+        const cfCls = cfClsMap[cf.level] || 'warn';
+        conflictRow = `<span class="decision-conflict" title="${escapeHtml(cf.note || '')}">桶间分歧 · <b class="q-${cfCls}">${escapeHtml(cf.level)}</b> <span class="decision-conflict-sigma">σ=${cf.dispersion}</span></span>`;
+    }
+
+    // 冻结横幅 (价格层失效)
+    const frozenBanner = isFrozen
+        ? `<div class="decision-frozen-banner">🧊 决策冻结：${escapeHtml((d.freeze_reasons || []).join(' · '))} · 本次不调仓</div>`
+        : '';
+
+    // 动作呈现: 冻结→置灰; 不可靠软闸门→改写为"数据质量不足"(明标数据闸门, 区别滞回维持)
+    let actionHtml;
+    if (dataGate) {
+        actionHtml = `<span class="decision-action gate" title="数据质量闸门, 区别于滞回维持">⛔ 数据质量不足</span>`;
+    } else {
+        actionHtml = `<span class="decision-action ${actionCls}${isFrozen ? ' is-frozen' : ''}">${actionIcon} ${escapeHtml(c.action)}</span>`;
+    }
+    const gateNote = dataGate
+        ? `<div class="decision-pending gate-note">🚧 今日数据质量不足 · 维持现仓、不据此调仓（数据闸门, 非滞回维持）; 目标档位仍供参考</div>`
+        : '';
+    const targetCls = 'decision-target' + (isFrozen ? ' is-frozen' : '');
 
     // 黑天鹅压力测试参考行 — 数值由后端从 blackswan_events.json 透传 (单一来源), 必须同给中位与最差
     const bs = d.blackswan_stress;
-    const stressLine = (bs && bs.dd_median != null && bs.dd_worst != null && c.target_mid != null) ? `
+    let stressLine = (bs && bs.dd_median != null && bs.dd_worst != null && c.target_mid != null) ? `
         <div class="decision-stats" style="font-size:0.68rem; color:var(--text-muted); margin-top:4px; line-height:1.5;">压力测试参考：历史黑天鹅相对前30日高点急跌中位 ${bs.dd_median}%、最差 ${bs.dd_worst}%（n=${bs.n} 事后追认样本，尾部无上界）→ 目标仓位中值 ${c.target_mid}% 对应组合瞬时回撤约 ${(bs.dd_median * c.target_mid / 100).toFixed(0)}% ~ ${(bs.dd_worst * c.target_mid / 100).toFixed(0)}%</div>` : '';
+    // 个人政策层的回撤容忍反向对照 (仅展示, 不作硬止损; 尾部无上界)
+    if (stressLine && c.policy && c.policy.max_drawdown_pct != null && bs && bs.dd_worst != null) {
+        const worstAtCeiling = (bs.dd_worst * c.policy.ceiling / 100).toFixed(0);
+        stressLine += `
+        <div class="decision-stats" style="font-size:0.68rem; color:var(--text-muted); margin-top:2px; line-height:1.5;">在你的集中度上限 ${c.policy.ceiling}% 下, 最坏组合瞬时回撤 ≈ ${worstAtCeiling}% vs 你的容忍 ${c.policy.max_drawdown_pct}%（仅展示对照, 尾部无上界, 不作硬止损）</div>`;
+    }
+
+    const attrRow = buildCycleAttribution(dash.cycle_buckets);
+    const policyBlock = buildPolicyBlock(c);
 
     document.getElementById('decisionCycle').innerHTML = `
         <div class="decision-card-title">🧭 长期 · 仓位决策 <span class="decision-freq">周级变化</span></div>
+        <div class="decision-quality-row">${qualityBadge}${conflictRow}</div>
+        ${frozenBanner}
         <div class="decision-main">
-            <span class="decision-target">${c.target_lo}–${c.target_hi}<small>%</small></span>
+            <span class="${targetCls}">${c.target_lo}–${c.target_hi}<small>%</small></span>
             <div class="decision-main-right">
-                <div class="decision-band">${c.band}</div>
-                <span class="decision-action ${actionCls}">${actionIcon} ${c.action}</span>
+                <div class="decision-band">${escapeHtml(c.band)}</div>
+                ${actionHtml}
             </div>
         </div>
+        ${gateNote}
+        <div class="decision-scoreline" id="decisionScoreLine"></div>
+        ${attrRow}
         ${hystNote}
+        ${policyBlock}
         <div class="decision-stats">该档位 12 年回测前瞻：${statChips(c.stats, ['90d', '180d', '365d'])}</div>
         ${stressLine}`;
+
+    updateDecisionScoreDelta();       // 当前分 + 较昨日 Δ (Δ 晚到时由 score-history 回调再填)
+    wirePolicyHoldingInput(c.policy); // 个人政策层持仓输入交互 (policy 为 null 时无操作)
 
     document.getElementById('decisionTactical').innerHTML = `
         <div class="decision-card-title">⚡ 短期 · 执行节奏 <span class="decision-freq">日级变化</span></div>
@@ -2497,6 +2659,12 @@ function renderScoreHistoryChart(series, events) {
 }
 
 function renderSignalChanges(changes) {
+    // 决策卡"较昨日 Δ"内联复用: 综合评分 delta 存模块变量, 就地回填决策卡评分行 (不重渲整卡)
+    _cycleScoreDelta = (changes && changes.total && typeof changes.total.delta === 'number')
+        ? { delta: changes.total.delta, base_date: changes.prev_date }
+        : null;
+    updateDecisionScoreDelta();
+
     const container = document.getElementById('signalChanges');
     const meta = document.getElementById('signalChangesMeta');
     if (!container) return;
