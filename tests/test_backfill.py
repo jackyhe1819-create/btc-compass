@@ -9,8 +9,11 @@ backfill.ensure_backfilled 的三块核心承诺回归测试:
 不触网 — 只 mock 网络取数层 (reconstruct 返回合成 entries), 存储层 (score_history.json /
 marker / 文件锁) 全部走 tmp_path 真实落盘再读回。
 """
+import json
 import os
 from datetime import datetime, timedelta
+
+import pytest
 
 from btc_dashboard import backfill
 
@@ -163,3 +166,50 @@ def test_ensure_backfilled_merge_priority(tmp_path, monkeypatch):
     # 全程无重复日期
     dates = [e["date"] for e in backfill._load_history(cache)]
     assert len(dates) == len(set(dates))
+
+
+# ============================================================
+# 4. 写盘失败不静默 (p1-6): marker 不误建 + 失败信号可见 + 异常上抛给重试循环
+# ============================================================
+
+def test_ensure_backfilled_write_failure_no_marker(tmp_path, monkeypatch, capsys):
+    """
+    磁盘满 (OSError 28) 等写盘失败时:
+      - 绝不创建 marker (否则幂等短路→8 次重试被绕过→评分历史静默永久丢失)
+      - 失败信号可见 (不再静默吞异常)
+      - 异常向上抛出, 供 app.py 的 8 次重试循环捕获重试
+    磁盘恢复后重试应成功建 marker (重试语义不变 — marker 未误建故可重建)。
+    """
+    rec = {"calls": 0, "days": []}
+    monkeypatch.setattr(backfill, "reconstruct", _make_fake_reconstruct(rec))
+    cache = str(tmp_path)
+
+    # 在真实 _save_history 的序列化点注入 OSError(28) —— 不 mock 存储层本身,
+    # 走真实 tmpfile / atomic-replace / 文件锁全链路, 只让"落盘那一下"失败
+    orig_dump = json.dump
+    state = {"fail": True}
+
+    def _maybe_boom(*a, **k):
+        if state["fail"]:
+            raise OSError(28, "No space left on device")
+        return orig_dump(*a, **k)
+
+    monkeypatch.setattr(json, "dump", _maybe_boom)
+
+    # 写盘失败必须向调用方抛出 (不再静默返回成功)
+    with pytest.raises(OSError):
+        backfill.ensure_backfilled(cache, days=30)
+
+    # marker 绝不能被创建
+    assert not os.path.exists(os.path.join(cache, backfill._MARKER))
+    # 原子写: tmp 已清理, 正式历史文件未被写坏 / 未创建
+    assert not os.path.exists(os.path.join(cache, "score_history.json"))
+    assert not any(f.startswith(".score_history_") for f in os.listdir(cache))
+    # 失败信号可见
+    assert "失败" in capsys.readouterr().out
+
+    # 磁盘恢复 → 重试成功: marker 建立、30 天历史真实落盘
+    state["fail"] = False
+    assert backfill.ensure_backfilled(cache, days=30) is True
+    assert os.path.exists(os.path.join(cache, backfill._MARKER))
+    assert len(backfill._load_history(cache)) == 30

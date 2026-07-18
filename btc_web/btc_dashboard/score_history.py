@@ -85,7 +85,13 @@ def _load_history(cache_dir: str) -> list:
 
 
 def _save_history(cache_dir: str, entries: list):
-    """原子写入（与 app.py 缓存同样的 tmpfile + rename 策略）"""
+    """原子写入（与 app.py 缓存同样的 tmpfile + rename 策略）。
+
+    写盘失败时记日志后向调用方抛出 (re-raise): 静默吞异常会让回填 marker 误建、
+    评分历史静默永久丢失、专为失败设计的重试被绕过 (p1-6 修复)。调用方各自决定
+    容忍或重试 —— record_score_snapshot 在刷新线程 (app.py 已 try/except 包裹,
+    失败可见且不阻塞); ensure_backfilled 在回填线程 (失败不建 marker, 交重试)。
+    """
     path = _history_path(cache_dir)
     try:
         fd, tmp = tempfile.mkstemp(dir=cache_dir, prefix=".score_history_", suffix=".tmp")
@@ -99,6 +105,7 @@ def _save_history(cache_dir: str, entries: list):
             raise
     except Exception as e:
         print(f"⚠️ 写入评分历史失败: {e}")
+        raise
 
 
 def load_history_entries(cache_dir: str) -> list:

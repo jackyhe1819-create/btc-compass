@@ -616,8 +616,8 @@ def ensure_backfilled(cache_dir: str, days: int = 90) -> bool:
     - 当前版本 marker 存在 → 跳过
     - 旧版本 marker 存在 → 判定历史中 backfilled 条目为旧口径污染数据,
       **全部清除**后按新口径重建 (真实快照永远保留, 决策层滞回重放随之自愈)
-    - 成功 → 合并写入 score_history.json + 写新 marker + 清理旧 marker
-    - 失败 → 抛异常, 由调用方稍后重试
+    - 成功 → 合并写入 score_history.json + 锁内重读校验落盘成功后, 才写新 marker + 清理旧 marker
+    - 失败 (写盘异常 / 落盘校验不通过) → 不建 marker + 抛异常, 由调用方稍后重试 (p1-6)
     """
     marker = os.path.join(cache_dir, _MARKER)
     if os.path.exists(marker):
@@ -654,7 +654,17 @@ def ensure_backfilled(cache_dir: str, days: int = 90) -> bool:
             if e["date"] not in merged or not e.get("backfilled"):
                 merged[e["date"]] = e
         final = sorted(merged.values(), key=lambda x: x["date"])
-        _save_history(cache_dir, final)
+        # 写盘 + 锁内重读校验后才往下建 marker: 写盘失败 (_save_history 抛出) 或落盘
+        # 不全都在此中止, 不建 marker, 异常上抛交由 app.py 的 8 次重试接管。
+        # (p1-6: 旧代码吞写异常→marker 误建→重试被绕过→评分历史静默永久丢失)
+        try:
+            _save_history(cache_dir, final)
+            persisted = len(_load_history(cache_dir))
+            if persisted < len(final):
+                raise RuntimeError(f"落盘校验不通过: 重读 {persisted}/{len(final)} 条")
+        except Exception as e:
+            print(f"❌ 评分历史回填写盘失败, 不创建 marker (交由重试): {e}")
+            raise
 
     with open(marker, "w") as f:
         f.write(datetime.now().isoformat())
