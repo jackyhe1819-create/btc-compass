@@ -35,8 +35,13 @@ from typing import List, Optional
 HYST_DELTA = 0.05
 HYST_CONFIRM = 5
 
-# 重放窗口: 滞回状态由最近 N 天评分历史推导 (回填保证 ≥90 天)
+# 回填保证的最小历史深度 — app.py/backfill.py 引用此常量, 确保滞回重放窗口喂满
 REPLAY_DAYS = 365
+
+# 滞回重放取全量持久化历史 (与 score_history 落盘上限一致), 与 extract_events 同源。
+# 不再切 [-365:] 子窗: 子窗左边界随历史增长滑动会使 replay 种子 (窗口起点原始档)
+# 漂移, 造成无 δ/N 确认的静默换档; 用全量历史后种子仅在越过 730 上限时才移动。
+_MAX_ENTRIES = 730
 
 # 档位定义 — 阈值与 scoring.cycle_recommendation 一致 (2026-07 重标定)
 # (下界, 档名, 仓位下限%, 仓位上限%, 目标中值%, band_stats.json 键)
@@ -190,7 +195,7 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
     warnings = []
 
     # ── 长期: 滞回重放得到生效档位 ──
-    hist_scores = [e["total_score"] for e in history_entries[-REPLAY_DAYS:]
+    hist_scores = [e["total_score"] for e in history_entries[-_MAX_ENTRIES:]
                    if e.get("total_score") is not None]
     # 历史末条即今日快照 (record_score_snapshot 先于本函数执行);
     # 若历史为空 (首次冷启动) 用当前分数单点退化
@@ -205,6 +210,15 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
     raw_idx = _cycle_band_idx(cycle_score)
 
     _, held_name, pos_lo, pos_hi, pos_mid, held_key = CYCLE_BANDS[held_idx]
+
+    # 静默漂移护栏: 窗口内无任何确认换档时, 生效档位纯由窗口起点原始档 (seed) 决定。
+    # 若当前分数原始档已不同、又无确认中的候选 (分数落在档位滞回缓冲内), 则生效档
+    # 实为历史窗口边界的产物 — 越过 730 上限左滑时可无声换档, 如实标注不静默降级。
+    if (all(b == seq[0] for b in seq) and held_idx != raw_idx
+            and pending_idx is None):
+        warnings.append(
+            f"生效档位「{held_name}」由评分历史窗口起点原始档决定, 窗口内无滞回确认换档; "
+            f"当前分数原始档为「{CYCLE_BANDS[raw_idx][1]}」, 历史窗口滑动时档位可能漂移")
 
     # 今日动作: 换档瞬间给方向性动作, 其余维持
     if held_idx != prev_idx:
@@ -287,7 +301,7 @@ def extract_events(history_entries: list) -> list:
     口径与 backtest/event_study.py 一致 (10天去抖); 仅覆盖窗口内历史,
     每个事件自带诚实标注。
     """
-    pts = [(e["date"], e["total_score"]) for e in history_entries
+    pts = [(e["date"], e["total_score"]) for e in history_entries[-_MAX_ENTRIES:]
            if e.get("total_score") is not None]
     if len(pts) < 12:
         return []

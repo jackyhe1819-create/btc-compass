@@ -133,3 +133,63 @@ def test_compute_decision_empty_history_degrades():
     out = decision.compute_decision(_dashboard(0.2), [])
     assert out["cycle"]["band"] == "标准配置"  # 单点退化仍给出档位
     assert any("评分历史" in w for w in out["warnings"])
+
+
+# ────────────────────────────────────────────────────────────
+# 窗口不变量 — 重放窗口滑动不得造成无确认的静默换档
+# (回归 hysteresis-window: [-365:] 子窗左边界滑动使 seed 漂移)
+# ────────────────────────────────────────────────────────────
+
+# 复现序列: 0.13 落在标准档 [0.15,0.30) 的滞回缓冲 (下界-δ=0.10) 内 — 既不确认
+# 破位也不触发候选; 生效档位纯由窗口起点 (0.16→标准 / 0.13→中性) 决定。恰 365 天,
+# 等于旧 REPLAY_DAYS 窗口, 尾部再增一天即令 [-365:] 左边界滑过开头的 0.16。
+_DRIFT_BASE = [0.16] * 5 + [0.13] * 360
+
+
+def test_hysteresis_window_offset_no_silent_drift():
+    """尾部增删 ±5/±10 天 (模拟历史随每日快照增长), 生效档位不得静默变化。
+
+    修复前 compute_decision 取 [-365:] 子窗: 尾部增 5 天使左边界滑过开头 5 个 0.16,
+    seed 从 0.16(标准) 跳到 0.13(中性), 无 δ/N 确认却静默降档、界面仍显示「维持」。
+    """
+    def held_band(scores):
+        out = decision.compute_decision(_dashboard(scores[-1]), _history(scores))
+        return out["cycle"]["band"]
+
+    base_band = held_band(_DRIFT_BASE)
+    assert base_band == "标准配置"
+    for off in (5, 10, -5, -10):
+        scores = _DRIFT_BASE + [0.13] * off if off > 0 else _DRIFT_BASE[:off]
+        assert held_band(scores) == base_band, \
+            f"窗口偏移 {off} 天导致无确认的静默换档: {held_band(scores)} != {base_band}"
+
+
+def test_full_history_replay_not_365_subwindow():
+    """>365 天历史: 滞回重放须用全量历史 (与 extract_events 同源), 而非 [-365:] 子窗。
+
+    [0.16]*5 + [0.13]*400: 全量重放 seed=0.16→标准; 旧 [-365:] 子窗丢掉全部 0.16 →
+    seed=0.13→中性。断言取全量口径 (标准), 证实两条 seq 分裂已消除。
+    """
+    scores = [0.16] * 5 + [0.13] * 400
+    out = decision.compute_decision(_dashboard(0.13), _history(scores))
+    assert out["cycle"]["band"] == "标准配置"
+    # extract_events 同源: 档位全程不变 → 不产生任何「滞回换档」事件
+    switches = [e for e in decision.extract_events(_history(scores))
+                if "滞回" in e["label"]]
+    assert switches == []
+
+
+def test_silent_drift_flagged_in_warnings():
+    """生效档位由窗口起点原始档决定、当前分数原始档已不同时, warnings 须如实标注。"""
+    out = decision.compute_decision(_dashboard(0.13), _history(_DRIFT_BASE))
+    c = out["cycle"]
+    assert c["band"] == "标准配置" and c["raw_band"] == "中性观望"
+    assert c["raw_differs"] is True
+    assert any("窗口起点" in w for w in out["warnings"]), \
+        "生效档位由窗口起点决定却未标注静默漂移风险"
+
+
+def test_steady_state_no_silent_drift_warning():
+    """稳态 (生效档==原始档): 新增的静默漂移警告不得误报。"""
+    out = decision.compute_decision(_dashboard(0.20), _history([0.20] * 60))
+    assert not any("窗口起点" in w for w in out["warnings"])
