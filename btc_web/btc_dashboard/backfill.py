@@ -44,6 +44,7 @@ from .factor_kernels import (
 )
 from .score_history import _load_history, _save_history, history_write_lock
 from .options import fetch_dvol_history
+from . import gist_store
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
             "Accept": "application/json"}
@@ -65,6 +66,15 @@ _MARKER = "score_history_backfilled.v7.marker"
 _OLD_MARKERS = ("score_history_backfilled.marker", "score_history_backfilled.v2.marker",
                 "score_history_backfilled.v3.marker", "score_history_backfilled.v4.marker",
                 "score_history_backfilled.v5.marker", "score_history_backfilled.v6.marker")
+
+# Gist 恢复门槛 (跨冷启动持久化, gist_store):
+# - 本地历史条目数 < _GIST_TRUST_DEPTH 时尝试从 Gist 恢复基线 (冷启动清盘后本地≈空)
+# - 恢复到的条目数 ≥ _GIST_TRUST_DEPTH 才视其为"可信深基线", 只重建近端缺口
+#   (否则如首次运行 Gist 里仅零星几条, 仍走完整 365 天重建, 不被浅历史带偏)
+_GIST_TRUST_DEPTH = 300
+# 恢复后仍重建的近端天数余量: 覆盖"最后一次 push 到今天"的缺口 + 几天重叠冗余,
+# 保证近端因子用最新可得数据刷新 (更早的深基线保持 Gist 恢复的稳定字节不动)
+_GIST_GAP_MARGIN = 7
 
 
 # ============================================================
@@ -603,12 +613,36 @@ def reconstruct(days: int = 90, cache_dir: str = None) -> list:
     return entries
 
 
+def _merge_restored(existing: list, restored: list) -> list:
+    """把 Gist 恢复的条目并入本地历史 (真实快照永远优先)。
+
+    合并优先级 (与主回填合并同精神):
+      - 真实快照 (非 backfilled) 永远压过恢复的回填条目 (本地实测 > 云端重建)
+      - 恢复条目填充其余日期 (冷启动本地≈空时即由它铺满基线)
+      - 本地已有的回填条目仅在恢复缺该日期时保留 (不单向缩水历史深度)
+    """
+    by_date = {}
+    for e in restored:
+        d = e.get("date")
+        if d:
+            by_date[d] = e
+    for e in existing:
+        d = e.get("date")
+        if not d:
+            continue
+        if not e.get("backfilled") or d not in by_date:
+            by_date[d] = e
+    return sorted(by_date.values(), key=lambda x: x["date"])
+
+
 def ensure_backfilled(cache_dir: str, days: int = 90) -> bool:
     """
     幂等回填入口 (app 启动线程调用)。
     - 当前版本 marker 存在 → 跳过
     - 旧版本 marker 存在 → 判定历史中 backfilled 条目为旧口径污染数据,
       **全部清除**后按新口径重建 (真实快照永远保留, 决策层滞回重放随之自愈)
+    - Gist 可用且本地历史缺失/过短 → 先从 Gist 恢复稳定基线 (口径版本门守卫),
+      恢复到可信深基线时只重建近端缺口, 从根上止住冷启动"重掷骰子"式滞回翻转
     - 成功 → 合并写入 score_history.json + 锁内重读校验落盘成功后, 才写新 marker + 清理旧 marker
     - 失败 (写盘异常 / 落盘校验不通过) → 不建 marker + 抛异常, 由调用方稍后重试 (p1-6)
     """
@@ -628,6 +662,28 @@ def ensure_backfilled(cache_dir: str, days: int = 90) -> bool:
             days = max(days, span)
         print(f"🧹 检测到旧版本回填 marker: 清除 {len(purged_dates)} 条旧口径回填条目, "
               f"按 v2 口径重建 {days} 天")
+
+    # ── Gist 恢复: 本地历史缺失/过短 且 Gist 可用时先恢复稳定基线, 再决定重建窗口 ──
+    # 只在非 stale 路径尝试 (stale 是本地库版口径迁移, 有独立清除语义; Render 冷启动
+    # 清盘无任何 marker → 恒非 stale, 正是本恢复要覆盖的常见场景)。恢复条目 marker
+    # 口径与当前一致 (口径门已在 restore_entries 里守过), 与 stale 清除互斥。
+    if not stale_rebuild and len(existing) < _GIST_TRUST_DEPTH and gist_store.is_enabled():
+        restored = gist_store.restore_entries(_MARKER)
+        if restored:
+            # 先把恢复+合并结果落盘: 即便随后 reconstruct 失败, 稳定基线也已在盘上,
+            # 重试时本地已≥门槛 → 不再重复恢复 (无限恢复防护)
+            with history_write_lock(cache_dir):
+                cur = _load_history(cache_dir)
+                existing = _merge_restored(cur, restored)
+                _save_history(cache_dir, existing)
+            # 可信深基线 → 只重建近端缺口 (最后条目→今天 + 余量), 更早的深基线保持
+            # 恢复的稳定字节不动, 使滞回重放窗口在冷启动间字节一致
+            if len(restored) >= _GIST_TRUST_DEPTH:
+                last_date = max((e["date"] for e in existing if e.get("date")), default=None)
+                if last_date:
+                    gap = (datetime.now() - datetime.strptime(last_date, "%Y-%m-%d")).days
+                    days = min(days, max(_GIST_GAP_MARGIN, gap + _GIST_GAP_MARGIN))
+                    print(f"🧩 Gist 深基线已恢复, 只重建近端 {days} 天缺口")
 
     new_entries = reconstruct(days, cache_dir)
     if not new_entries:
@@ -667,6 +723,11 @@ def ensure_backfilled(cache_dir: str, days: int = 90) -> bool:
         except OSError:
             pass
     print(f"✅ 评分历史回填完成: 新增 {len(new_entries)} 天, 合计 {len(final)} 天")
+
+    # 回填成功后把深历史推送到 Gist (跨冷启动恢复基线) —— push 自身永不抛异常且
+    # Gist 禁用时为空操作; 同步推 (本身已在后台回填线程内), 失败只打日志不影响回填。
+    if gist_store.is_enabled():
+        gist_store.push_history_to_gist(gist_store.build_payload(final))
     return True
 
 

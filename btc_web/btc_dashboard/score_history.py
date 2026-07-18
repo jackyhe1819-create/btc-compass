@@ -115,6 +115,25 @@ def load_history_entries(cache_dir: str) -> list:
     return _load_history(cache_dir)
 
 
+def _push_history_snapshot(entries: list) -> None:
+    """同步把全量评分历史推送到 Gist (供跨冷启动恢复)。Gist 禁用时空操作;
+    任何异常吞掉只打日志 —— 持久化是尽力而为, 绝不影响评分主流程。惰性导入
+    gist_store 隔离导入期环路。"""
+    try:
+        from . import gist_store
+        if not gist_store.is_enabled():
+            return
+        gist_store.push_history_to_gist(gist_store.build_payload(entries))
+    except Exception as e:
+        print(f"⚠️ Gist 推送异常 (已忽略, 不影响评分): {e}")
+
+
+def _push_history_to_gist_async(entries: list) -> None:
+    """跨日变更后异步推送 (daemon 线程), 不阻塞刷新主流程。"""
+    threading.Thread(target=_push_history_snapshot, args=(entries,),
+                     daemon=True).start()
+
+
 def record_score_snapshot(dashboard: dict, cache_dir: str):
     """
     记录一次仪表盘快照到评分历史。
@@ -154,6 +173,9 @@ def record_score_snapshot(dashboard: dict, cache_dir: str):
 
     with history_write_lock(cache_dir):
         entries = _load_history(cache_dir)
+        # 日期变更 (新的一天首次落盘) 才推 Gist —— 天然去抖: 同日多次刷新只覆盖当日
+        # 条目, 不重复推送 (record 每 ~5 分钟一次, 一天上百次)
+        new_day = not (entries and entries[-1].get("date") == today)
         if entries and entries[-1].get("date") == today:
             entries[-1] = entry
         else:
@@ -161,6 +183,11 @@ def record_score_snapshot(dashboard: dict, cache_dir: str):
 
         entries = entries[-_MAX_ENTRIES:]
         _save_history(cache_dir, entries)
+
+    # 落盘成功后 (锁外, 不阻塞后续写者), 跨日变更时异步推送全量历史到 Gist。
+    # 推送失败只打日志不影响主流程 (push 自身永不抛异常, Gist 禁用时为空操作)。
+    if new_day:
+        _push_history_to_gist_async(list(entries))
 
 
 def _compute_changes(prev: Optional[dict], curr: dict) -> dict:

@@ -21,4 +21,11 @@ services:
         sync: false
       - key: BLOCKBEATS_APP_SECRET
         sync: false
+      # 评分历史 GitHub Gist 持久化 (跨冷启动恢复稳定基线, 根治滞回状态重掷骰子);
+      # 两个都不设则功能整体静默禁用, 现行为零变化, 须两者齐备才启用。
+      # 建议: 用 gist-only 细粒度 token (仅勾 gists 读写最小权限), Gist 设为 secret。
+      - key: GIST_ID                # 目标 Gist 的 id (评分历史存 score_history.json)
+        sync: false
+      - key: GIST_TOKEN            # gist-only 细粒度 PAT (最小权限)
+        sync: false
     plan: free
