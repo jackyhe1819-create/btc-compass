@@ -19,6 +19,7 @@ from .core import (
     POWER_LAW_INTERCEPT, POWER_LAW_SLOPE,
     AHR999_A, AHR999_B,
     fetch_realtime_btc_price, fetch_btc_data,
+    _price_lag_days, PRICE_MAX_LAG_DAYS,
 )
 from .indicators_long import (
     calc_two_year_ma_multiplier, calc_200w_ma_heatmap, calc_golden_ratio_multiplier,
@@ -277,6 +278,24 @@ def get_sparklines(df: pd.DataFrame, indicators: dict, days: int = 7) -> dict:
     return sparklines
 
 
+def _apply_realtime_price(df: pd.DataFrame, price: float) -> pd.DataFrame:
+    """把实时价并入价格历史 df (原地):
+    末行日期==今天 → 更新该行收盘; 否则追加今日新行, 不覆盖旧日期收盘。
+
+    旧实现无条件把今日实时价盖到末行上; 当历史末日期是过去某天时,
+    这会让滚动均线跑在"旧窗口 + 今日价"的错位状态上 (weeks-old MA state +
+    today's price), 算出错误仓位。改为追加今日新行以保持时序对齐
+    (2026-07 价格新鲜度守卫修复)。返回同一 df (便于链式调用)。
+    """
+    today = pd.Timestamp.now().normalize()
+    last_ts = pd.Timestamp(df.index[-1]).normalize()
+    if last_ts == today:
+        df.iloc[-1, df.columns.get_loc('price')] = price
+    else:
+        df.loc[today, 'price'] = price
+    return df
+
+
 def run_dashboard() -> DashboardResult:
     """运行仪表盘分析 — 并行版本"""
     # 获取历史数据（用于计算指标）
@@ -286,11 +305,21 @@ def run_dashboard() -> DashboardResult:
     if data_synthetic:
         print("🚨 价格数据为合成示例数据 — 评分仅作管线演示, 将标记为无效")
 
+    # 价格历史新鲜度 — 在实时价追加/更新之前捕获真实历史末日期,
+    # 否则追加今日行后 last_date 恒为今天, 无法反映历史滞后。
+    price_stale = bool(df.attrs.get("stale", False))
+    price_history_last_ts = pd.Timestamp(df.index[-1])
+    price_history_last_date = price_history_last_ts.strftime("%Y-%m-%d")
+    price_history_lag_days = _price_lag_days(price_history_last_ts)
+    if price_stale:
+        print(f"🚨 价格历史滞后 {price_history_lag_days} 天 "
+              f"(末={price_history_last_date}, >{PRICE_MAX_LAG_DAYS}天) — 评分基于陈旧数据")
+
     # 优先使用实时价格 API，失败则回退到历史数据最新价格
     realtime_price = fetch_realtime_btc_price()
     if realtime_price is not None:
         current_price = realtime_price
-        df.iloc[-1, df.columns.get_loc('price')] = current_price
+        _apply_realtime_price(df, current_price)
     else:
         current_price = df['price'].iloc[-1]
         print("⚠️ 使用历史数据价格（非实时）")
@@ -386,6 +415,12 @@ def run_dashboard() -> DashboardResult:
         # 合成数据熔断: 分数照常计算 (便于调试管线), 但建议文本明确标记无效
         recommendation = "🚨 全部价格源失效 — 当前为演示数据, 评分无效, 请勿参考"
         tactical_recommendation = "🚨 演示数据, 评分无效"
+    elif price_stale:
+        # 价格滞后熔断: 全部源均滞后 >7 天, 分数照算但如实前置告警传给 warnings/展示
+        stale_warn = (f"⚠️ 价格历史滞后 {price_history_lag_days} 天 "
+                      f"(末={price_history_last_date}) — 评分基于陈旧数据, 请谨慎参考")
+        recommendation = f"{stale_warn} | {recommendation}"
+        tactical_recommendation = f"{stale_warn} | {tactical_recommendation}"
 
     # 触发价位表 (机械反解, 失败不拖垮仪表盘; 合成数据下无意义, 跳过)
     trigger_levels = None
@@ -411,6 +446,10 @@ def run_dashboard() -> DashboardResult:
         cycle_coverage=scores["cycle_coverage"],
         tactical_coverage=scores["tactical_coverage"],
         trigger_levels=trigger_levels,
+        price_stale=price_stale,
+        price_history_last_date=price_history_last_date,
+        price_history_lag_days=price_history_lag_days,
+        price_df=df,
     )
 
     return result

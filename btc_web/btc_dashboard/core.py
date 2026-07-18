@@ -143,18 +143,54 @@ class DashboardResult:
     cycle_coverage: float = 1.0              # 周期分有效因子权重覆盖率 (0~1)
     tactical_coverage: float = 1.0           # 战术分有效因子权重覆盖率 (0~1)
     trigger_levels: Optional[Dict] = None    # 触发价位表 (triggers.py, 机械反解非预测)
+    price_stale: bool = False                # True = 全部价格源滞后 >7 天, 用了滞后最小的一份
+    price_history_last_date: str = ""        # 价格历史末日期 (实时价追加前, YYYY-MM-DD)
+    price_history_lag_days: int = 0          # 价格历史末日期距今天数 (0 = 今日/新鲜)
+    price_df: Optional[pd.DataFrame] = None  # 评分所用价格 df (已含实时价追加); app 层复用避免二次 fetch, 不入 JSON
 
 
 # ============================================================
 # 数据获取
 # ============================================================
 
+# 价格新鲜度守卫 — 与 backtest/data_sources.py 同源同阈值 (price_lag_days /
+# PRICE_MAX_LAG_DAYS)。因生产由 gunicorn 以 cwd=btc_web 运行, 运行时 sys.path
+# 不含仓库根, 无法跨目录 import backtest.*, 故在此复刻一份纯函数保持生产/回测口径
+# 一致。改阈值须两处同步 (backtest/data_sources.py:72 与本处)。
+# 教训: 缓存/上游滞后曾把陈旧价格当新鲜, 让滚动均线跑在错位窗口上算仓位。
+PRICE_MAX_LAG_DAYS = 7
+
+
+def _price_lag_days(last_date, today=None) -> int:
+    """价格序列末日期距今天数 (纯函数)。与 backtest.data_sources.price_lag_days 同实现。"""
+    now = pd.Timestamp(today) if today is not None else pd.Timestamp.now()
+    return int((now.normalize() - pd.Timestamp(last_date).normalize()).days)
+
+
 def fetch_btc_data(start_date: str = "2013-01-01", max_retries: int = 3) -> pd.DataFrame:
-    """获取 BTC 历史价格数据（带重试机制，多数据源）"""
+    """获取 BTC 历史价格数据（带重试机制，多数据源）
+
+    每个数据源返回前校验末日期滞后: 滞后 <=PRICE_MAX_LAG_DAYS 天视为新鲜, 直接采用;
+    超限则暂存为候选并换下一源。全部来源均滞后 (但非空) 时选滞后最小的一份,
+    attrs 标 stale=True + lag_days (类比 synthetic 熔断), 交由 runner/app 告警。
+    """
     import time
-    
+
     print("📥 正在获取 BTC 价格数据...")
-    
+
+    # 滞后但非空的候选 [(lag_days, df), ...]; 所有源都不新鲜时取滞后最小者
+    stale_candidates: list = []
+
+    def _fresh_or_stash(frame: pd.DataFrame):
+        """新鲜(滞后<=上限)则原样返回以供上层 return; 否则暂存候选并返回 None 促换源。"""
+        lag = _price_lag_days(frame.index[-1])
+        if lag <= PRICE_MAX_LAG_DAYS:
+            return frame
+        print(f"⚠️ {frame.attrs.get('source', '?')} 数据滞后 {lag} 天 "
+              f"(>{PRICE_MAX_LAG_DAYS}天), 尝试下一数据源...")
+        stale_candidates.append((lag, frame))
+        return None
+
     # 方法1: Yahoo Finance
     for attempt in range(max_retries):
         try:
@@ -172,8 +208,11 @@ def fetch_btc_data(start_date: str = "2013-01-01", max_retries: int = 3) -> pd.D
             btc.columns = ['price']
             btc.attrs["source"] = "Yahoo Finance"
             print(f"✅ Yahoo Finance: 获取到 {len(btc)} 条数据，最新日期: {btc.index[-1].date()}")
-            return btc
-            
+            fresh = _fresh_or_stash(btc)
+            if fresh is not None:
+                return fresh
+            break  # 数据滞后, 停止重试该源, 转下一数据源
+
         except Exception as e:
             error_msg = str(e)
             print(f"⚠️ Yahoo Finance 尝试 {attempt + 1}/{max_retries} 失败: {error_msg}")
@@ -206,7 +245,9 @@ def fetch_btc_data(start_date: str = "2013-01-01", max_retries: int = 3) -> pd.D
                 df = df[df["price"] > 0]
                 df.attrs["source"] = "CryptoCompare"
                 print(f"✅ CryptoCompare: 获取到 {len(df)} 条数据，最新日期: {df.index[-1].date()}")
-                return df
+                fresh = _fresh_or_stash(df)
+                if fresh is not None:
+                    return fresh
         else:
             print(f"⚠️ CryptoCompare API Error: Status {response.status_code}")
     except Exception as e:
@@ -231,7 +272,9 @@ def fetch_btc_data(start_date: str = "2013-01-01", max_retries: int = 3) -> pd.D
                 df = df[["price"]]
                 df.attrs["source"] = "CoinGecko"
                 print(f"✅ CoinGecko: 获取到 {len(df)} 条数据，最新日期: {df.index[-1].date()}")
-                return df
+                fresh = _fresh_or_stash(df)
+                if fresh is not None:
+                    return fresh
         else:
             print(f"⚠️ CoinGecko API Error: Status {response.status_code}")
     except Exception as e:
@@ -256,7 +299,9 @@ def fetch_btc_data(start_date: str = "2013-01-01", max_retries: int = 3) -> pd.D
                 df = df[["price"]]
                 df.attrs["source"] = "Kraken"
                 print(f"✅ Kraken: 获取到 {len(df)} 条数据，最新日期: {df.index[-1].date()}")
-                return df
+                fresh = _fresh_or_stash(df)
+                if fresh is not None:
+                    return fresh
         else:
             print(f"⚠️ Kraken API Error: Status {response.status_code}")
     except Exception as e:
@@ -279,11 +324,25 @@ def fetch_btc_data(start_date: str = "2013-01-01", max_retries: int = 3) -> pd.D
             df = df[["price"]]
             df.attrs["source"] = "Binance"
             print(f"✅ Binance: 获取到 {len(df)} 条数据，最新日期: {df.index[-1].date()}")
-            return df
+            fresh = _fresh_or_stash(df)
+            if fresh is not None:
+                return fresh
         else:
             print(f"⚠️ Binance API Error: Status {response.status_code}")
     except Exception as e:
         print(f"⚠️ Binance API 失败: {e}")
+
+    # 全部来源均滞后 (但非空): 选滞后最小的一份, attrs 标 stale=True + lag_days
+    # (类比 synthetic 熔断), 交由 runner/app 在决策/展示层告警,
+    # 而非静默拿陈旧价格算仓位 (旧实现会把首个非空源直接采用, 无视滞后)。
+    if stale_candidates:
+        stale_candidates.sort(key=lambda x: x[0])  # lag 升序, 稳定排序保留源优先级
+        lag, df = stale_candidates[0]
+        df.attrs["stale"] = True
+        df.attrs["lag_days"] = lag
+        print(f"🚨 全部价格源滞后 >{PRICE_MAX_LAG_DAYS}天, 选用滞后最小的一份 "
+              f"({df.attrs.get('source', '?')}, 滞后 {lag} 天), 已标记 stale")
+        return df
 
     # 方法5: 所有来源都失败，使用示例数据
     print("⚠️ 无法获取实时数据，使用示例数据演示...")
