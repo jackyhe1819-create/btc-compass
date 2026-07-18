@@ -17,6 +17,11 @@ def _ind(score, value=1.0):
     return SimpleNamespace(value=value, score=score)
 
 
+def _ind_card(score, value=1.0, color="🟡", status="ok"):
+    """构造完整卡片形态指标 (含 .color/.status), 供降级路径改写卡片状态的测试。"""
+    return SimpleNamespace(value=value, score=score, color=color, status=status)
+
+
 # ────────────────────────────────────────────────────────────
 # _percentile_score
 # ────────────────────────────────────────────────────────────
@@ -134,3 +139,59 @@ def test_compute_dual_scores_low_coverage_warns():
     assert out["cycle_coverage"] < 0.5
     assert "可信度低" in out["cycle_recommendation"]
     assert "可信度低" in out["tactical_recommendation"]
+
+
+def _full_cycle_cards(score=0.3):
+    """按 CYCLE_BUCKETS 造齐全套完整卡片形态指标。"""
+    return {m: _ind_card(score) for b in scoring.CYCLE_BUCKETS.values()
+            for m in b["members"]}
+
+
+def test_compute_dual_scores_short_history_degrades_trend_bucket():
+    """价格史 <400 天 (CoinGecko 365 天备源真实降级) 时, 趋势伸展桶的分位数
+    归一化整体失效, 不得静默保留已被裁决淘汰的绝对阈值离散分。应按 NaN 剔除
+    (与 backfill 同语义): 整桶退出评分、覆盖率如实下降。df=None (纯单元测试
+    路径) 行为不变。"""
+    trend_members = scoring.CYCLE_BUCKETS["趋势伸展"]["members"]
+
+    # 对照组: df=None → 趋势桶保留, 覆盖率满
+    out_none = scoring.compute_dual_scores(_full_cycle_cards(), None)
+    assert out_none["cycle_coverage"] == 1.0
+    assert out_none["cycle_buckets"]["趋势伸展"]["score"] is not None
+
+    # 降级组: 300 天 (<400) 合成 df → 趋势桶成员被剔除, 覆盖率下降
+    short_df = pd.DataFrame(
+        {"price": np.linspace(100.0, 200.0, 300)},
+        index=pd.date_range("2025-01-01", periods=300),
+    )
+    degraded = _full_cycle_cards()
+    out_short = scoring.compute_dual_scores(degraded, short_df)
+
+    # 覆盖率如实下降 (趋势伸展桶 0.25 权重退出, 其余 5 桶合 0.75)
+    assert out_short["cycle_coverage"] < out_none["cycle_coverage"]
+    assert abs(out_short["cycle_coverage"] - 0.75) < 1e-9
+
+    # 整桶退出评分, 每个成员被剔除 (score=None)
+    assert out_short["cycle_buckets"]["趋势伸展"]["score"] is None
+    for md in out_short["cycle_buckets"]["趋势伸展"]["members"]:
+        assert md["score"] is None
+
+    # 底层指标被置为不可用: value=NaN → _compute_bucket_scores 剔除; 卡片标注降级原因
+    for m in trend_members:
+        assert np.isnan(degraded[m].value)
+        assert "价格史不足" in degraded[m].status
+
+
+def test_compute_dual_scores_ample_history_keeps_trend_bucket():
+    """价格史 ≥400 天时不触发降级剔除, 趋势伸展桶正常参与评分。"""
+    ample_df = pd.DataFrame(
+        {"price": np.linspace(100.0, 200.0, 500)},
+        index=pd.date_range("2024-01-01", periods=500),
+    )
+    inds = _full_cycle_cards()
+    out = scoring.compute_dual_scores(inds, ample_df)
+    assert out["cycle_coverage"] == 1.0
+    assert out["cycle_buckets"]["趋势伸展"]["score"] is not None
+    # 未被降级剔除 (value 仍有效)
+    for m in scoring.CYCLE_BUCKETS["趋势伸展"]["members"]:
+        assert not np.isnan(inds[m].value)

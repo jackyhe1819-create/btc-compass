@@ -117,6 +117,12 @@ MEMBER_WEIGHTS = {
 # 分位数窗口：4 年（一个完整减半周期）
 PERCENTILE_WINDOW = 1460
 
+# 分位数归一化所需的最短价格史 (天)。低于此值 (如价格链路降级到 CoinGecko
+# 365 天备源) compute_percentile_overrides 整体返回空, 趋势伸展桶成员会回退到
+# indicators_long 的绝对阈值离散分 —— 本版评分明文淘汰的旧口径。compute_dual_scores
+# 据此在降级时按 NaN 剔除该桶成员 (与 backfill 同语义), 使覆盖率如实下降。
+PERCENTILE_MIN_HISTORY = 400
+
 
 # ============================================================
 # 滚动分位数归一化
@@ -153,7 +159,7 @@ def compute_percentile_overrides(df: pd.DataFrame) -> Dict[str, Tuple[float, str
     返回 {指标名: (score, 附加说明)}。
     """
     out = {}
-    if df is None or len(df) < 400:
+    if df is None or len(df) < PERCENTILE_MIN_HISTORY:
         return out
 
     price = df['price']
@@ -314,6 +320,25 @@ def compute_dual_scores(indicators: Dict[str, IndicatorResult],
     2. 周期分 + 战术分 分别按因子桶计算
     """
     apply_percentile_overrides(indicators, df)
+
+    # 价格史降级守卫: df 过短 (如价格链路降级到 CoinGecko 365 天备源) 时,
+    # compute_percentile_overrides 整体失效, 趋势伸展桶成员会保留 indicators_long
+    # 的绝对阈值离散分 (Ahr999 0.45/1.2、幂律走廊上下轨) —— 本版明文淘汰、顶部
+    # 打不出 -1 的旧口径, 且不可纵向比较。与 backfill (backfill.py:478-480 对分位
+    # 缺失成员 NaN 剔除) 保持一致: 把该桶成员置为不可用 (value=NaN → 退出评分),
+    # 整桶退出使覆盖率如实下降并可触发既有的 <0.5 警示, 而非静默污染评分历史。
+    # 注意 df is None 是纯单元测试路径 (不喂价格序列), 行为保持不变。
+    if df is not None and len(df) < PERCENTILE_MIN_HISTORY:
+        for m in CYCLE_BUCKETS["趋势伸展"]["members"]:
+            ind = indicators.get(m)
+            if ind is None or np.isnan(ind.value):
+                continue
+            ind.value = float('nan')
+            ind.score = 0
+            ind.color = "⚪"
+            note = "⚠️价格史不足, 分位分暂不可用 (未计入周期分)"
+            if note not in (ind.status or ""):
+                ind.status = f"{ind.status} | {note}"
 
     cycle_score, cycle_detail, cycle_cov = _compute_bucket_scores(CYCLE_BUCKETS, indicators)
     tactical_score, tactical_detail, tactical_cov = _compute_bucket_scores(TACTICAL_BUCKETS, indicators)
