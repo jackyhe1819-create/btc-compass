@@ -28,6 +28,7 @@ btc_dashboard.notify
 """
 
 import os
+import re
 import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -259,6 +260,23 @@ def _format_phase_alert(dashboard: dict, prev_phase: str) -> str:
 # 渠道: 配置驱动 (有环境变量才启用)
 # ============================================================
 
+def _mask(secret: str) -> str:
+    """凭据脱敏: 长串保留前4后4便于对账, 短串全掩码 — 不泄漏完整凭据。"""
+    return f"{secret[:4]}…{secret[-4:]}" if len(secret) > 8 else "***"
+
+
+def _redact(msg: str) -> str:
+    """抹掉 requests 异常串里内嵌的推送凭据 — 连接类异常 (ConnectTimeout/
+    ConnectionError/SSLError) 经 urllib3 MaxRetryError 会带完整请求 URL:
+    企微 webhook key 在 ?key=... query, Server酱 sendkey 在 /<key>.send 路径。
+    异常原文 print 直入 Render 日志流, 不脱敏等于把可注入伪推送的凭据写进日志。"""
+    msg = re.sub(r"(key=)([^&\s)]+)",
+                 lambda m: m.group(1) + _mask(m.group(2)), msg)
+    msg = re.sub(r"(/)([^/\s]+)(\.send\b)",
+                 lambda m: m.group(1) + _mask(m.group(2)) + m.group(3), msg)
+    return msg
+
+
 def _send_wecom(text: str, webhook_url: str) -> bool:
     """企业微信群机器人 markdown 消息。返回是否发送成功。"""
     import requests
@@ -274,7 +292,7 @@ def _send_wecom(text: str, webhook_url: str) -> bool:
             print(f"⚠️ 企微推送被拒: HTTP {r.status_code} {r.text[:200]}")
         return ok
     except Exception as e:
-        print(f"⚠️ 企微推送失败: {e}")
+        print(f"⚠️ 企微推送失败: {_redact(str(e))}")
         return False
 
 
@@ -292,7 +310,7 @@ def _send_serverchan(title: str, desp: str, sendkey: str) -> bool:
             print(f"⚠️ Server酱推送被拒: HTTP {r.status_code} {r.text[:200]}")
         return ok
     except Exception as e:
-        print(f"⚠️ Server酱推送失败: {e}")
+        print(f"⚠️ Server酱推送失败: {_redact(str(e))}")
         return False
 
 
@@ -314,7 +332,7 @@ def send_test(cache_dir: str = "") -> dict:
         try:
             results[name] = bool(send(title, text))
         except Exception as e:
-            print(f"⚠️ 测试推送 [{name}] 异常: {e}")
+            print(f"⚠️ 测试推送 [{name}] 异常: {_redact(str(e))}")
             results[name] = False
     return {"channels": results, "any": any(results.values())}
 

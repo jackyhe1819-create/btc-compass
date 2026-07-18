@@ -322,3 +322,56 @@ def test_multi_channel_any_success_advances_state(tmp_path, monkeypatch):
     assert out["sent"] == 1                       # 一挂一通仍算送达
     out2 = notify.check_and_alert(_dash(cycle_band="标准配置"), str(tmp_path))
     assert out2["alerts"] == 0                     # 状态已推进, 不重复轰炸
+
+
+# ── 凭据脱敏: 推送异常不得把 webhook key / sendkey 打进日志 (CWE-532) ──
+# requests 连接类异常 (ConnectTimeout/ConnectionError/SSLError, 经 urllib3
+# MaxRetryError) 的 str 内嵌完整请求 URL: 企微 key 在 ?key= query, Server酱
+# sendkey 在 /<key>.send 路径。这两处 print 直入 Render 日志流, 拿到凭据者
+# 可向用户微信伪造推送 — 必须脱敏后再落日志。
+
+def _raiser(msg):
+    def _boom(*a, **k):
+        raise ConnectionError(msg)
+    return _boom
+
+
+def test_wecom_exception_does_not_leak_webhook_key(monkeypatch, capsys):
+    key = "ABCD1234-secret-webhook-key-XYZ9"
+    url = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={key}"
+    monkeypatch.setattr("requests.post", _raiser(
+        f"HTTPSConnectionPool(host='qyapi.weixin.qq.com', port=443): "
+        f"Max retries exceeded with url: /cgi-bin/webhook/send?key={key} "
+        f"(Caused by SSLError(SSLEOFError(8, 'EOF ...')))"))
+    ok = notify._send_wecom("hi", url)
+    out = capsys.readouterr().out
+    assert ok is False
+    assert "企微推送失败" in out                 # 仍打印可诊断信息, 未静默吞掉
+    assert key not in out                        # 完整 webhook key 不得泄漏
+    assert "secret-webhook-key" not in out       # 中段亦不得残留
+
+
+def test_serverchan_exception_does_not_leak_sendkey(monkeypatch, capsys):
+    key = "SCT12345secretSENDKEY"
+    monkeypatch.setattr("requests.post", _raiser(
+        f"HTTPSConnectionPool(host='sctapi.ftqq.com', port=443): "
+        f"Max retries exceeded with url: /{key}.send "
+        f"(Caused by SSLError(SSLEOFError(8, 'EOF ...')))"))
+    ok = notify._send_serverchan("t", "body", key)
+    out = capsys.readouterr().out
+    assert ok is False
+    assert "Server酱推送失败" in out
+    assert key not in out                        # 完整 sendkey 不得泄漏
+    assert "secretSENDKEY" not in out
+
+
+def test_redact_masks_credentials_but_keeps_diagnostics():
+    key = "ABCD1234-secret-webhook-key-XYZ9"
+    sk = "SCT12345secretSENDKEY"
+    w = notify._redact(f"... url: /cgi-bin/webhook/send?key={key} (Caused ...)")
+    s = notify._redact(f"... url: /{sk}.send (Caused ...)")
+    assert key not in w and "ABCD" in w          # 掩码后保留前缀便于对账
+    assert sk not in s and "SCT1" in s
+    # 无凭据的普通异常串原样通过 (不误伤诊断信息)
+    plain = "Read timed out. (read timeout=10)"
+    assert notify._redact(plain) == plain
