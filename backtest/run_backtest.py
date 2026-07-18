@@ -130,6 +130,8 @@ def main():
         "cycle_window": f"{cycle.dropna().index[0].date()} → {cycle.dropna().index[-1].date()}",
         "tactical_window": f"{tactical.dropna().index[0].date()} → {tactical.dropna().index[-1].date()}",
         "hysteresis": {"delta": HYST_DELTA, "confirm": HYST_CONFIRM},
+        # 档位评分边界自描述元数据 — test_consistency 逐一对账 decision 阈值 (2026-07 收尾审计)
+        **ev.band_score_bounds(),
         "cycle": _fwd_to_dict(cyc_fwd),
         "tactical": _fwd_to_dict(tac_fwd),
     }

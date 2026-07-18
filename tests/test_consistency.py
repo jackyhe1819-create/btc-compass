@@ -197,6 +197,26 @@ def test_band_stats_entries_complete(band_stats):
             assert entry[w]["n"] > 0, f"tactical「{key}」{w} 样本数为 0"
 
 
+def test_band_stats_bounds_match_decision(band_stats):
+    """band_stats.json 必须自描述周期/战术评分下界, 且与 decision 现行阈值逐一相等。
+
+    此前 band_stats 只被档位仓位标签键集合钉住 (test_band_stats_covers_all_bands),
+    周期分评分下界与 band_stats 内容零耦合 —— 一致改掉五份源文件的周期下界却保留
+    仓位标签、漏重跑 backtest/run_backtest.py 时, 五个跨源测试与四个 band_stats 测试
+    全绿, 而 band_stats.json 的 n/mean/median/win 仍按旧边界分桶 (决策面板前瞻收益
+    静默过期)。复刻已生效的 hysteresis 数据侧守卫, 补上周期分一侧缺口。
+
+    评分下界由 backtest.evaluate.band_score_bounds() 写入 band_stats.json 元数据
+    (run_backtest.py 重跑落盘)。
+    """
+    cyc = [lo for lo, *_ in decision.CYCLE_BANDS if lo != float("-inf")]
+    tac = [lo for lo, *_ in decision.TACTICAL_BANDS if lo != float("-inf")]
+    assert band_stats.get("cycle_bounds") == cyc, \
+        "band_stats.json cycle_bounds ≠ decision.CYCLE_BANDS 下界 — 改周期档位阈值后须重跑 backtest/run_backtest.py"
+    assert band_stats.get("tactical_bounds") == tac, \
+        "band_stats.json tactical_bounds ≠ decision.TACTICAL_BANDS 下界 — 改战术档位阈值后须重跑 backtest/run_backtest.py"
+
+
 # ────────────────────────────────────────────────────────────
 # scoring.py 因子桶配置自洽
 # ────────────────────────────────────────────────────────────

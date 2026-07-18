@@ -33,6 +33,21 @@ TACTICAL_BANDS = [
 ]
 
 
+def band_score_bounds() -> dict:
+    """周期/战术档位的评分下界向量 (排除 -inf 哨兵) —— band_stats.json 自描述元数据。
+
+    run_backtest.py 生成 band_stats.json 时把本函数返回值展开进顶层
+    (``**ev.band_score_bounds()``), 使落盘的档位边界随评分阈值一起刷新;
+    tests/test_consistency.py 再把落盘边界与 decision.CYCLE_BANDS/TACTICAL_BANDS
+    逐一对账。此前 band_stats 只被档位仓位标签键集合钉住, 微调评分下界而保标签、
+    漏重跑回测时全绿而分档前瞻收益静默过期 —— 本字段复刻 hysteresis 那条数据侧守卫补缺。
+    """
+    return {
+        "cycle_bounds": [lo for lo, *_ in CYCLE_BANDS if lo != float("-inf")],
+        "tactical_bounds": [lo for lo, *_ in TACTICAL_BANDS if lo != float("-inf")],
+    }
+
+
 def band_label(score, bands):
     for lo, hi, label, *_ in bands:
         if lo <= score < hi or (hi == float("inf") and score >= lo):

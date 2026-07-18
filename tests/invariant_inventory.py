@@ -89,6 +89,15 @@ INVARIANT_INVENTORY = [
                 "btc_web/btc_dashboard/data/band_stats.json"],
      "guard": "test_consistency::test_hysteresis_params_match_backtest_source", "status": "guarded",
      "note": "另有 test_hysteresis_params_match_band_stats 校验数据侧。"},
+    {"name": "周期/战术评分阈值 (score bounds) ↔ band_stats.json 数据内容",
+     "places": ["btc_web/btc_dashboard/decision.py:43-67",
+                "backtest/evaluate.py:36-48 (band_score_bounds)",
+                "btc_web/btc_dashboard/data/band_stats.json"],
+     "guard": "test_consistency::test_band_stats_bounds_match_decision", "status": "guarded",
+     "note": "此前 band_stats 只被档位仓位标签键集合钉住 (test_band_stats_covers_all_bands), "
+             "评分下界与数据内容零耦合 — 微调评分下界而保标签、漏重跑回测时全绿而分档前瞻"
+             "收益静默过期; 复刻 HYST_* 数据侧守卫补上周期分缺口。评分下界由 "
+             "evaluate.band_score_bounds() 写入 band_stats.json (run_backtest.py 重跑落盘)。"},
     {"name": "桶权重合计=1.0 / MEMBER_WEIGHTS 引用真实成员",
      "places": ["btc_web/btc_dashboard/scoring.py:34-100"],
      "guard": "test_consistency::test_bucket_weights_sum_to_one", "status": "guarded",

@@ -8,7 +8,8 @@ backtest.factors
 
 防前视原则:
 - 分位数归一化: 仅用截至当日的过去 1460 天 (滚动窗), 与现网 _percentile_score 完全一致
-- MVRV-Z 的 σ(市值): 用截至当日的全历史扩张标准差 (Glassnode 定义)
+- MVRV-Z 的 σ(市值): 主用截至当日 rolling(730) 标准差 (对齐现网 CM-primary),
+  数据不足(<730天)时逐点回退全历史扩张 std (≈bd/Glassnode 口径)
 - 均线/EMA/重采样: 只依赖当日及之前数据
 """
 
@@ -131,15 +132,18 @@ def cycle_factor_scores(cm: pd.DataFrame,
 
     # ---- 链上筹码桶 ----
     # MVRV-Z (2026-07 对抗性审查修复: 分位数为主 + 绝对阈值极值保底)
-    # 绝对阈值腿: 全历史扩张 std (近似 bd/Glassnode 口径)   [calc_mvrv_z 阈值]
-    # 分位数腿:   rolling(730) std 派生序列的 4 年分位 (与现网 _fetch_cm_history 同口径)
+    # 绝对阈值腿与分位数腿同源, 均套在 rolling(730) std 派生序列上, 逐点对齐现网
+    # CM-primary (calc_mvrv_z → _cm_chip_last → history._fetch_cm_history 的 730σ 口径)。
+    # 全历史扩张 std (≈bd/Glassnode 口径) 仅在 730σ 数据不足(<730天)时逐点回退,
+    # 对齐现网 CM 缺失→bd 备源的降级语义。   [calc_mvrv_z 阈值 0/1/3/5]
     mcap = cm["mcap"]
     rcap = mcap / cm["mvrv"]
-    mvrv_z = (mcap - rcap) / mcap.expanding(min_periods=365).std()
     mvrv_z_730 = (mcap - rcap) / mcap.rolling(730).std()
+    mvrv_z_exp = (mcap - rcap) / mcap.expanding(min_periods=365).std()  # 730σ 不足时的备源
+    mvrv_z_abs = mvrv_z_730.where(mvrv_z_730.notna(), mvrv_z_exp)
     out["MVRV-Z"] = _extreme_combine(
         rolling_percentile_score(mvrv_z_730),
-        _step_score(mvrv_z, [0, 1, 3, 5], [1, 0.5, 0, -0.5, -1]))
+        _step_score(mvrv_z_abs, [0, 1, 3, 5], [1, 0.5, 0, -0.5, -1]))
 
     # STH成本线: 现价/STH已实现价格   [calc_sth_realized_price 阈值]
     sth_ratio = price / bd_sth.reindex(idx)

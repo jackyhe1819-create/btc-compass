@@ -1,5 +1,5 @@
 {
- "generated": "2026-07-18 09:26",
+ "generated": "2026-07-18 11:16",
  "window": "2014-06-01 ~ 2026-07-17",
  "note": "历史频率统计, 样本内标定 (相位规则与统计同源同史), n=3~4 个周期; 是'该判读历史上的含义'而非校准概率, 非收益承诺",
  "phases": {
@@ -104,67 +104,67 @@
   },
   "bear_late": {
    "name": "熊末·冷清超跌",
-   "episodes": 14,
-   "days": 1082,
+   "episodes": 11,
+   "days": 978,
    "fwd": {
     "90d": {
-     "median_pct": 20.8,
-     "pos_pct": 75.0,
-     "n": 1082
+     "median_pct": 18.3,
+     "pos_pct": 72.0,
+     "n": 978
     },
     "180d": {
-     "median_pct": 51.2,
-     "pos_pct": 90.0,
-     "n": 1082
+     "median_pct": 52.9,
+     "pos_pct": 89.0,
+     "n": 978
     },
     "365d": {
-     "median_pct": 129.5,
+     "median_pct": 125.1,
      "pos_pct": 98.0,
-     "n": 1082
+     "n": 978
     }
    }
   },
   "early_bull": {
    "name": "牛初·修复启动",
-   "episodes": 11,
-   "days": 282,
+   "episodes": 8,
+   "days": 329,
    "fwd": {
     "90d": {
-     "median_pct": 12.1,
-     "pos_pct": 76.0,
-     "n": 282
+     "median_pct": 23.2,
+     "pos_pct": 88.0,
+     "n": 329
     },
     "180d": {
-     "median_pct": 59.6,
-     "pos_pct": 90.0,
-     "n": 282
+     "median_pct": 54.6,
+     "pos_pct": 91.0,
+     "n": 329
     },
     "365d": {
-     "median_pct": 153.4,
+     "median_pct": 239.0,
      "pos_pct": 100.0,
-     "n": 282
+     "n": 329
     }
    }
   },
   "transition": {
    "name": "过渡·无鲜明相位",
-   "episodes": 19,
-   "days": 825,
+   "episodes": 20,
+   "days": 882,
    "fwd": {
     "90d": {
-     "median_pct": 16.3,
-     "pos_pct": 58.0,
-     "n": 825
+     "median_pct": 14.5,
+     "pos_pct": 57.0,
+     "n": 882
     },
     "180d": {
-     "median_pct": 21.4,
-     "pos_pct": 60.0,
-     "n": 825
+     "median_pct": 28.3,
+     "pos_pct": 62.0,
+     "n": 882
     },
     "365d": {
-     "median_pct": 111.1,
-     "pos_pct": 72.0,
-     "n": 802
+     "median_pct": 112.2,
+     "pos_pct": 74.0,
+     "n": 859
     }
    }
   }
