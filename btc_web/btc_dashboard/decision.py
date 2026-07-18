@@ -127,7 +127,8 @@ def _load_position_policy() -> Optional[dict]:
 
 
 def apply_position_policy(band_lo, band_hi, band_mid,
-                          policy: Optional[dict]) -> Optional[dict]:
+                          policy: Optional[dict],
+                          band_name: Optional[str] = None) -> Optional[dict]:
     """把标准档位仓位 (band_lo/hi/mid, 均为 0-100%) 线性投影进个人操作区间
     [floor, ceiling] 并 clamp, 返回并列的个人目标带。
 
@@ -135,6 +136,11 @@ def apply_position_policy(band_lo, band_hi, band_mid,
     (要求 0<=floor<=baseline<=ceiling<=100) → 返回 None, 前端不显示个人带。
     映射以标准中性 50% 为轴: personal(x)=baseline+(x-50)*(ceiling-floor)/100,
     再 clamp 到 [floor,ceiling] — baseline 偏离区间中点时高/低档会真实贴顶/贴底。
+
+    band_overrides: policy 可选按档名点名覆盖区间 ({"标准配置": [50, 75], ...}) —
+    仿射映射是一条直线, 表达不了逐档手工阶梯; 点名档位直接用给定 [lo, hi]
+    (mid 取中点), 未点名档位仍走仿射。覆盖值非法 (须 0<=lo<=hi<=100) 时
+    忽略该条覆盖回退仿射, 不使整个政策层失效。
     """
     if not policy or not policy.get("enabled"):
         return None
@@ -152,15 +158,35 @@ def apply_position_policy(band_lo, band_hi, band_mid,
         p = baseline + (float(x) - 50.0) * span / 100.0
         return round(min(max(p, floor), ceiling), 1)
 
-    out = {
-        "personal_lo": _project(band_lo),
-        "personal_mid": _project(band_mid),
-        "personal_hi": _project(band_hi),
+    override = None
+    ov_map = policy.get("band_overrides")
+    if band_name and isinstance(ov_map, dict) and band_name in ov_map:
+        try:
+            o_lo, o_hi = float(ov_map[band_name][0]), float(ov_map[band_name][1])
+            if 0 <= o_lo <= o_hi <= 100:
+                override = (round(o_lo, 1), round(o_hi, 1))
+        except (TypeError, ValueError, IndexError, KeyError):
+            override = None
+
+    if override is not None:
+        out = {
+            "personal_lo": override[0],
+            "personal_mid": round((override[0] + override[1]) / 2, 1),
+            "personal_hi": override[1],
+            "overridden": True,
+        }
+    else:
+        out = {
+            "personal_lo": _project(band_lo),
+            "personal_mid": _project(band_mid),
+            "personal_hi": _project(band_hi),
+        }
+    out.update({
         "floor": round(floor, 1),
         "ceiling": round(ceiling, 1),
         "baseline": round(baseline, 1),
-        "note": _POLICY_NOTE,
-    }
+        "note": _POLICY_NOTE + (" (本档为手动覆盖区间)" if override else ""),
+    })
     md = policy.get("max_drawdown_pct")
     if md is not None:
         try:
@@ -408,7 +434,8 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
     conflict = _bucket_conflict(dashboard.get("cycle_buckets"))
 
     policy = apply_position_policy(pos_lo, pos_hi, pos_mid,
-                                   _load_position_policy())
+                                   _load_position_policy(),
+                                   band_name=held_name)
 
     stats = _load_band_stats()
     return {

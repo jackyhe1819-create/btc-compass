@@ -403,3 +403,33 @@ def test_frozen_does_not_alter_targets():
     assert fz["frozen"] is True and base["frozen"] is False
     for k in ("band", "target_lo", "target_hi", "target_mid", "action_type"):
         assert fz["cycle"][k] == base["cycle"][k], f"冻结改动了 cycle.{k}"
+
+
+def test_policy_band_override_applied():
+    """点名档位用手动覆盖区间 (mid=中点, overridden 标记), 未点名档仍走仿射。"""
+    p = _policy(baseline=50, floor=0, ceiling=100)
+    p["band_overrides"] = {"标准配置": [50, 75]}
+    out = decision.apply_position_policy(40, 60, 50, p, band_name="标准配置")
+    assert (out["personal_lo"], out["personal_mid"], out["personal_hi"]) == (50, 62.5, 75)
+    assert out.get("overridden") is True
+    # 未点名档: 仿射直通 (0/50/100 = 恒等)
+    out2 = decision.apply_position_policy(30, 50, 40, p, band_name="中性观望")
+    assert (out2["personal_lo"], out2["personal_hi"]) == (30, 50)
+    assert "overridden" not in out2
+
+
+def test_policy_band_override_invalid_falls_back():
+    """覆盖值非法 (lo>hi / 越界 / 形状错) → 忽略该条回退仿射, 政策层整体不失效。"""
+    p = _policy(baseline=50, floor=0, ceiling=100)
+    for bad in ([75, 50], [-5, 30], [50, 120], "not-a-range", [50]):
+        p["band_overrides"] = {"标准配置": bad}
+        out = decision.apply_position_policy(40, 60, 50, p, band_name="标准配置")
+        assert out is not None and "overridden" not in out
+        assert (out["personal_lo"], out["personal_hi"]) == (40, 60)
+
+
+def test_policy_band_override_never_touches_targets():
+    """覆盖档位下标准 target 逐字不变 (纯叠加不被破坏)。"""
+    out = decision.compute_decision(_dashboard(0.20), _history([0.20] * 60))
+    c = out["cycle"]
+    assert (c["target_lo"], c["target_hi"], c["target_mid"]) == (40, 60, 50)
