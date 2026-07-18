@@ -23,7 +23,7 @@ BTC Compass 双评分引擎。
 
 import numpy as np
 import pandas as pd
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from .core import IndicatorResult, GENESIS_DATE, AHR999_A, AHR999_B
 
@@ -269,6 +269,39 @@ def _compute_bucket_scores(buckets_cfg: dict,
     return float(final), detail, float(weight_sum)
 
 
+def factor_coverage_from_buckets(buckets_detail: Dict[str, dict]) -> Optional[float]:
+    """因子级覆盖率: Σ(存活成员权重×桶权重) / Σ(全成员权重×桶权重)。
+
+    桶级覆盖率 (_compute_bucket_scores 第 3 返回值) 把"整桶存活"当"满覆盖" ——
+    桶内因子逐个流失对它零影响 (整桶只剩 1 个成员也算该桶满权重), 会把少数因子
+    驱动的评分冒充成满覆盖 (p1-4)。本函数逐成员计权, 使桶内流失如实压低覆盖率,
+    专供低覆盖警示触发。
+
+    从 compute_dual_scores 产出的桶明细 (cycle_buckets/tactical_buckets) 复算,
+    使 decision 层无 indicators 时也能得到同一口径 (成员 score 非 None = 存活,
+    与 _compute_bucket_scores 的 value=NaN 剔除同义)。明细为空或无权重时返回 None,
+    调用方回退到桶级 coverage。
+    """
+    if not buckets_detail:
+        return None
+    alive_w = 0.0
+    total_w = 0.0
+    for bucket_name, bd in buckets_detail.items():
+        if not isinstance(bd, dict):
+            # 旧缓存/降级载荷可能是简化形状 (桶名→分数), 无成员明细可计, 整体回退
+            return None
+        bucket_weight = bd.get("weight", 0.0)
+        member_weights = MEMBER_WEIGHTS.get(bucket_name, {})
+        for md in bd.get("members", []):
+            w = member_weights.get(md.get("name"), 1.0) * bucket_weight
+            total_w += w
+            if md.get("score") is not None:
+                alive_w += w
+    if total_w <= 0:
+        return None
+    return float(alive_w / total_w)
+
+
 def cycle_recommendation(score: float) -> str:
     """
     周期分 → 仓位建议。
@@ -343,21 +376,33 @@ def compute_dual_scores(indicators: Dict[str, IndicatorResult],
     cycle_score, cycle_detail, cycle_cov = _compute_bucket_scores(CYCLE_BUCKETS, indicators)
     tactical_score, tactical_detail, tactical_cov = _compute_bucket_scores(TACTICAL_BUCKETS, indicators)
 
+    # 因子级覆盖率 (p1-4): 桶级 cycle_cov/tactical_cov 语义与字段名保留 (向后兼容),
+    # 但它对"桶内因子逐个流失"失明 (整桶留 1 个成员即算满覆盖), 系统性高估广度。
+    # 低覆盖警示改以因子级触发 —— 逐成员计权, 桶内流失如实降覆盖率。
+    cycle_factor_cov = factor_coverage_from_buckets(cycle_detail)
+    tactical_factor_cov = factor_coverage_from_buckets(tactical_detail)
+    if cycle_factor_cov is None:
+        cycle_factor_cov = cycle_cov
+    if tactical_factor_cov is None:
+        tactical_factor_cov = tactical_cov
+
     cycle_rec = cycle_recommendation(cycle_score)
     tactical_rec = tactical_recommendation(tactical_score)
     # 覆盖率护栏: 有效因子权重过半缺失时, 评分由极少数因子决定, 必须警示
-    if cycle_cov < 0.5:
-        cycle_rec = f"⚠️ 数据覆盖仅{cycle_cov:.0%} · {cycle_rec} (可信度低)"
-    if tactical_cov < 0.5:
-        tactical_rec = f"⚠️ 数据覆盖仅{tactical_cov:.0%} · {tactical_rec} (可信度低)"
+    if cycle_factor_cov < 0.5:
+        cycle_rec = f"⚠️ 数据覆盖仅{cycle_factor_cov:.0%} · {cycle_rec} (可信度低)"
+    if tactical_factor_cov < 0.5:
+        tactical_rec = f"⚠️ 数据覆盖仅{tactical_factor_cov:.0%} · {tactical_rec} (可信度低)"
 
     return {
         "cycle_score": round(cycle_score, 3),
         "cycle_recommendation": cycle_rec,
         "cycle_buckets": cycle_detail,
         "cycle_coverage": round(cycle_cov, 3),
+        "cycle_factor_coverage": round(cycle_factor_cov, 3),
         "tactical_score": round(tactical_score, 3),
         "tactical_recommendation": tactical_rec,
         "tactical_buckets": tactical_detail,
         "tactical_coverage": round(tactical_cov, 3),
+        "tactical_factor_coverage": round(tactical_factor_cov, 3),
     }

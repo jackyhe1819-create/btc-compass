@@ -30,6 +30,8 @@ import os
 import json
 from typing import List, Optional
 
+from .scoring import factor_coverage_from_buckets
+
 # 滞回参数 — 与 backtest/run_backtest.py HYST_DELTA/HYST_CONFIRM 保持一致
 # (取自 δ∈[0.03,0.06]×N∈[3,7] 回测网格平台中部, 非单点调优)
 HYST_DELTA = 0.05
@@ -246,8 +248,15 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
     # ── 数据质量护栏 ──
     if dashboard.get("data_synthetic"):
         warnings.append("🚨 价格为演示数据, 本决策无效")
-    cov_c = dashboard.get("cycle_coverage")
-    cov_t = dashboard.get("tactical_coverage")
+    # 低覆盖警示以因子级覆盖率为准 (p1-4): 桶级 coverage 对"桶内因子逐个流失"失明。
+    # 现网 dashboard 携带 cycle_buckets/tactical_buckets, 据此复算因子级覆盖率;
+    # 缺明细的旧口径 dashboard 回退到桶级 cycle_coverage/tactical_coverage。
+    cov_c = factor_coverage_from_buckets(dashboard.get("cycle_buckets"))
+    if cov_c is None:
+        cov_c = dashboard.get("cycle_coverage")
+    cov_t = factor_coverage_from_buckets(dashboard.get("tactical_buckets"))
+    if cov_t is None:
+        cov_t = dashboard.get("tactical_coverage")
     if cov_c is not None and cov_c < 0.5:
         warnings.append(f"周期分因子覆盖率仅 {cov_c:.0%}, 仓位决策可信度低")
     if cov_t is not None and cov_t < 0.5:

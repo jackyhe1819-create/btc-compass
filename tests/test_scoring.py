@@ -137,8 +137,46 @@ def test_compute_dual_scores_low_coverage_warns():
     inds = {"Mayer Multiple": _ind(0.3)}  # 仅 1 因子 → 覆盖率远低于 0.5
     out = scoring.compute_dual_scores(inds, None)
     assert out["cycle_coverage"] < 0.5
+    assert out["cycle_factor_coverage"] < 0.5
     assert "可信度低" in out["cycle_recommendation"]
     assert "可信度低" in out["tactical_recommendation"]
+
+
+# ────────────────────────────────────────────────────────────
+# 因子级覆盖率 (p1-4): 桶级覆盖率对桶内因子逐个流失失明, 因子级戳穿
+# ────────────────────────────────────────────────────────────
+
+def test_factor_coverage_full_survival_is_one():
+    """全因子存活 → 因子级覆盖率 = 1, 与桶级一致, 不触发警示。"""
+    inds = {**_full_indicators(scoring.CYCLE_BUCKETS, 0.3),
+            **_full_indicators(scoring.TACTICAL_BUCKETS, -0.2)}
+    out = scoring.compute_dual_scores(inds, None)
+    assert out["cycle_factor_coverage"] == 1.0
+    assert out["tactical_factor_coverage"] == 1.0
+    assert "⚠️" not in out["cycle_recommendation"]
+    assert "⚠️" not in out["tactical_recommendation"]
+
+
+def test_factor_coverage_one_member_per_bucket_flags_low_coverage():
+    """每桶仅留 1 个成员存活 (cycle 13 因子只活 6): 桶级覆盖率仍满 (每桶都有
+    活成员), 但因子级如实跌破 0.5 → 触发低覆盖警示。正是 p1-4 修复的核心场景 ——
+    桶级把'桶内因子逐个流失'冒充满覆盖, 因子级戳穿。"""
+    survivors = {}
+    for bucket in scoring.CYCLE_BUCKETS.values():
+        survivors[bucket["members"][0]] = _ind(0.3)  # 每桶留第 1 个成员
+    assert len(survivors) == 6  # 6 桶各 1 个 → 6/13 存活
+    out = scoring.compute_dual_scores(survivors, None)
+
+    # 桶级覆盖率满 (旧口径盲区): 每桶都有活成员
+    assert out["cycle_coverage"] == 1.0
+    # 因子级如实反映 13 因子只活 6 个 → 显著 <1, 且 < 桶级, 且跌破 0.5
+    assert out["cycle_factor_coverage"] < 1.0
+    assert out["cycle_factor_coverage"] < out["cycle_coverage"]
+    assert out["cycle_factor_coverage"] < 0.5
+    # Σ(存活成员权重×桶权重)=0.7975 / Σ(全成员权重×桶权重)=1.90 ≈ 0.42
+    assert abs(out["cycle_factor_coverage"] - 0.42) < 0.01
+    # 低覆盖警示以因子级触发
+    assert "可信度低" in out["cycle_recommendation"]
 
 
 def _full_cycle_cards(score=0.3):
