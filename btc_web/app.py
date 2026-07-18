@@ -204,9 +204,15 @@ def _do_refresh_dashboard():
             "sparklines": sparklines
         }
         # 记录每日评分快照（用于评分历史曲线 + 今日信号变化）
-        # 合成演示数据不入历史 — 避免污染评分曲线与信号变化检测
+        # 合成演示数据不入历史 — 避免污染评分曲线与信号变化检测。
+        # 价格全源陈旧 (price_stale) 同样不入历史: 评分基于错位均线窗口, 分数不可信,
+        # 写入会污染滞回重放历史 (陈旧分被后续档位重放误用); 陈旧数据仍供展示 (frozen
+        # 已置灰可执行数字), 但不进决策历史链 (2026-07 收口 Codex 复审 P1)。
         if result.data_synthetic:
             print("🚨 演示数据 — 跳过评分快照记录")
+        elif result.price_stale:
+            print(f"🚨 价格全源陈旧 (滞后 {result.price_history_lag_days} 天) — "
+                  f"跳过评分快照记录, 避免污染滞回重放历史")
         else:
             try:
                 record_score_snapshot(local, _CACHE_DIR)

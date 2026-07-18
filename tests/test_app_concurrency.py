@@ -57,7 +57,7 @@ class _FakeIndicator:
 
 class _FakeResult:
     """DashboardResult 的最小替身 (仅供 _do_refresh_dashboard 读取的属性)。"""
-    def __init__(self, synthetic=False):
+    def __init__(self, synthetic=False, stale=False):
         self.timestamp = datetime(2026, 7, 18, 12, 0, 0)
         self.btc_price = 118000.0
         self.indicators = {"MVRV-Z": _FakeIndicator()}
@@ -78,9 +78,9 @@ class _FakeResult:
         self.cycle_coverage = 1.0
         self.tactical_coverage = 1.0
         self.trigger_levels = None
-        self.price_stale = False
+        self.price_stale = stale
         self.price_history_last_date = "2026-07-18"
-        self.price_history_lag_days = 0
+        self.price_history_lag_days = 12 if stale else 0
         self.price_df = _make_df()  # 评分 df 复用通道 (app 回灌共享缓存)
 
 
@@ -90,22 +90,26 @@ def _make_df():
 
 
 def _patch_refresh_deps(monkeypatch, tmp_path, *, on_produce=None, phase_delay=0.0,
-                        synthetic=False):
+                        synthetic=False, stale=False, snapshot_calls=None):
     """把 _do_refresh_dashboard 的所有领域依赖替换为确定性替身, 存储层保持真实。
 
     on_produce(): 每个字段生产者被调用时的回调 (用于观测发布时机)。
+    snapshot_calls: 传入 list 时, 每次 record_score_snapshot 被调用追加一次 (观测跳过)。
     """
     def _hook():
         if on_produce is not None:
             on_produce()
 
     monkeypatch.setattr(appmod, "_CACHE_DIR", str(tmp_path))
-    monkeypatch.setattr(appmod, "run_dashboard", lambda: _FakeResult(synthetic=synthetic))
+    monkeypatch.setattr(appmod, "run_dashboard",
+                        lambda: _FakeResult(synthetic=synthetic, stale=stale))
     monkeypatch.setattr(appmod, "get_cached_btc_data", _make_df)
     monkeypatch.setattr(appmod, "get_sparklines",
                         lambda df, inds, days=7: {"MVRV-Z": [1.0, 2.0, 3.0]})
 
     def _snapshot(dashboard, cache_dir):
+        if snapshot_calls is not None:
+            snapshot_calls.append(dashboard)
         _hook()
     monkeypatch.setattr(appmod, "record_score_snapshot", _snapshot)
     monkeypatch.setattr(appmod, "load_history_entries", lambda cd: [])
@@ -224,6 +228,36 @@ def test_synthetic_refresh_still_atomic_and_complete(monkeypatch, tmp_path):
     assert new_cache["data_synthetic"] is True
     # 中途未污染全局。
     assert all(o is OLD for o in observed_during)
+
+
+def test_stale_price_skips_snapshot_but_publishes(monkeypatch, tmp_path):
+    """价格全源陈旧 (price_stale) → 跳过评分快照 (不污染滞回重放历史), 但缓存照常
+    完整发布 (陈旧数据仍供展示, frozen 已置灰可执行数字)。对照 data_synthetic 同款跳过。"""
+    snapshot_calls = []
+    _patch_refresh_deps(monkeypatch, tmp_path, stale=True, snapshot_calls=snapshot_calls)
+    monkeypatch.setattr(appmod, "_dashboard_cache", None)
+    monkeypatch.setattr(appmod, "_dashboard_cache_timestamp", None)
+
+    appmod._do_refresh_dashboard()
+
+    # 快照被跳过 —— 陈旧分数不进 score_history。
+    assert snapshot_calls == [], "price_stale 时评分快照仍被写入 — 会污染滞回重放历史"
+    # 但缓存仍完整发布 (展示层不断供)。
+    new_cache = appmod._dashboard_cache
+    assert new_cache is not None and _EXPECTED_KEYS.issubset(new_cache.keys())
+    assert new_cache["price_stale"] is True
+
+
+def test_fresh_price_still_records_snapshot(monkeypatch, tmp_path):
+    """对照组: 价格新鲜 (非 stale/非 synthetic) 时快照照常写入 — 证明跳过是 stale 专属。"""
+    snapshot_calls = []
+    _patch_refresh_deps(monkeypatch, tmp_path, snapshot_calls=snapshot_calls)
+    monkeypatch.setattr(appmod, "_dashboard_cache", None)
+    monkeypatch.setattr(appmod, "_dashboard_cache_timestamp", None)
+
+    appmod._do_refresh_dashboard()
+
+    assert len(snapshot_calls) == 1, "新鲜价格快照应正常写入"
 
 
 def test_get_cached_btc_data_dedups_concurrent_fetch(monkeypatch):

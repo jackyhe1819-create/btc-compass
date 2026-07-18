@@ -128,6 +128,7 @@ def _get_dashboard(base_url):
 _PROBE_FIELDS = [
     "ts", "base_url", "data_source", "data_synthetic", "btc_price",
     "cycle_score", "tactical_score", "cycle_coverage", "tactical_coverage",
+    "cycle_factor_coverage", "tactical_factor_coverage",
     "cycle_factors_alive", "cycle_factors_total",
     "tactical_factors_alive", "tactical_factors_total",
     "cache_age_s", "score_history_days", "cycle_band", "tactical_pace",
@@ -158,6 +159,8 @@ def _probe_metrics(base_url, data, indicators, scoring):
         "tactical_score": data.get("tactical_score"),
         "cycle_coverage": data.get("cycle_coverage"),
         "tactical_coverage": data.get("tactical_coverage"),
+        "cycle_factor_coverage": data.get("cycle_factor_coverage"),
+        "tactical_factor_coverage": data.get("tactical_factor_coverage"),
         "cycle_factors_alive": ca, "cycle_factors_total": ct,
         "tactical_factors_alive": ta, "tactical_factors_total": tt,
         "cache_age_s": data.get("cache_age_s"),
@@ -253,6 +256,9 @@ def probe_runtime(base_url) -> None:
     # 数据真实性与基本合理性
     if data.get("data_synthetic"):
         _report("FAIL", "价格为合成演示数据 — 所有真实价格源均失效")
+    elif data.get("price_stale"):
+        _report("FAIL", f"价格全源陈旧 (滞后 {data.get('price_history_lag_days', '?')} 天) "
+                        f"— 评分地基失效, 不可据此调仓 (决策已 frozen, 快照不入历史)")
     else:
         _report("OK", f"数据源: {data.get('data_source', '?')}")
 
@@ -268,9 +274,13 @@ def probe_runtime(base_url) -> None:
             _report("OK", f"{name} {v:+.3f}")
 
     # 逐因子存活 (以 scoring 桶配置为准绳)
+    # 覆盖率闸门优先读因子级 (按成员权重, 桶内逐个流失如实压低); 缺失时回退桶级
+    # (旧缓存兼容)。桶级把"整桶存活"当满覆盖, 少数因子驱动的评分会被冒充满覆盖而漏报
+    # (Codex 复审 P2): 因子级 47% 应 FAIL, 桶级 75% 却只 WARN。
     indicators = data.get("indicators") or {}
-    for label, cfg, cov_key in (("周期", scoring.CYCLE_BUCKETS, "cycle_coverage"),
-                                ("战术", scoring.TACTICAL_BUCKETS, "tactical_coverage")):
+    for label, cfg, factor_key, bucket_key in (
+            ("周期", scoring.CYCLE_BUCKETS, "cycle_factor_coverage", "cycle_coverage"),
+            ("战术", scoring.TACTICAL_BUCKETS, "tactical_factor_coverage", "tactical_coverage")):
         members = [m for b in cfg.values() for m in b["members"]]
         dead = [m for m in members
                 if not indicators.get(m) or indicators[m].get("value") is None]
@@ -279,15 +289,19 @@ def probe_runtime(base_url) -> None:
         else:
             _report("OK", f"{label}因子全部存活 ({len(members)} 个)")
 
-        cov = data.get(cov_key)
+        cov = data.get(factor_key)
+        cov_kind = "因子级"
+        if cov is None:
+            cov = data.get(bucket_key)
+            cov_kind = "桶级(回退)"
         if cov is None:
             _report("WARN", f"{label}覆盖率字段缺失")
         elif cov < COVERAGE_FAIL:
-            _report("FAIL", f"{label}覆盖率 {cov:.0%} < {COVERAGE_FAIL:.0%} — 评分已不可信")
+            _report("FAIL", f"{label}{cov_kind}覆盖率 {cov:.0%} < {COVERAGE_FAIL:.0%} — 评分已不可信")
         elif cov < COVERAGE_WARN:
-            _report("WARN", f"{label}覆盖率 {cov:.0%} (阈值 {COVERAGE_WARN:.0%})")
+            _report("WARN", f"{label}{cov_kind}覆盖率 {cov:.0%} (阈值 {COVERAGE_WARN:.0%})")
         else:
-            _report("OK", f"{label}覆盖率 {cov:.0%}")
+            _report("OK", f"{label}{cov_kind}覆盖率 {cov:.0%}")
 
     # 整桶死亡单独报 (比覆盖率更早定位到"哪一路信号瞎了")
     for label, key in (("周期", "cycle_buckets"), ("战术", "tactical_buckets")):
