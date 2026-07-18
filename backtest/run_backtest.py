@@ -181,6 +181,12 @@ def main():
     cov_t = engine.factor_coverage(tac_f)
     m = strat["metrics"]
     mtab = pd.DataFrame([{"组合": k, **v} for k, v in m.items()])
+    # 报告叙述数字随重跑动态插值 — 滞回回撤方向 / 周期分 365d IC 均取自本次计算,
+    # 杜绝硬编码陈旧数与滞回表 / IC 表自相矛盾 (2026-07 p1-5 报告一致性修复)
+    dd_base_c = strat_base_c["metrics"]["策略"]["最大回撤%"]
+    dd_hyst_c = strat_hyst["metrics"]["策略"]["最大回撤%"]
+    dd_dir = "变浅 (改善)" if dd_hyst_c > dd_base_c else "加深 (代价)"
+    ic365_c = float(cyc_ic.loc[cyc_ic["窗口"] == "365d", "IC"].iloc[0])
 
     report = f"""# BTC Compass 双评分历史回测报告
 
@@ -240,7 +246,7 @@ def main():
 两行均计单边 10bp 交易成本。基线逐日换档 12 年换 {strat_base_c['n_switches']} 次
 (边界附近日频往返, 决策不可执行); 滞回后 {strat_hyst['n_switches']} 次。
 参数取自 δ∈[0.03,0.06]×N∈[3,7] 网格平台中部 — 全网格 Sharpe 均 ≥ 基线,
-非单点调优; 代价是减仓延迟, 最大回撤略深 (约 -46.6%→-48.4%)。
+非单点调优; 减仓延迟为其固有代价, 最大回撤 {dd_base_c:+.1f}%→{dd_hyst_c:+.1f}% ({dd_dir})。
 
 {ev.md_table(hyst_tab, floatfmt="{:+.2f}")}
 
@@ -261,8 +267,8 @@ def main():
    在主升段提前触发, 负分只约束"别加杠杆追高", 不构成现货卖出信号 (文案已如实标注);
    含基差/多空比的完整配置仍无法回测检验。
 5. **2026-07 编码修复对 IC 的影响**: Pi Cycle 去掉常驻 +1、链上桶分位数化后,
-   周期分 IC 全窗口回落 (365d 0.475→0.36) — 旧 IC 中有一部分来自
-   "无信号=看多"编码搭上 BTC 长期上行漂移的样本内红利, 属虚高;
+   剔除了旧 IC 里"无信号=看多"编码搭 BTC 长期上行漂移的样本内红利 (曾一度压低 IC, 属去虚高);
+   其后 MVRV-Z 绝对阈值修复 (见局限6③) 补回周期振幅, 现周期分 365d IC = {ic365_c:+.3f} (见上表);
    新口径最大回撤改善 (-49%→-45%), Sharpe 基本持平, 熊市中段不再出现满分看多票。
 
 ![scores](charts/scores_vs_price.svg)
