@@ -115,6 +115,25 @@ def main():
                           "年均换档": round(s["n_switches"] / n_years, 1)})
     hyst_tab = pd.DataFrame(hyst_rows)
 
+    # ---- 证伪对照: 简单基准横比 (仅 price 派生, 与本系统同窗对齐) ----
+    sys_row = {"策略": "周期分档位(本系统)", "平均仓位%": strat["avg_pos"] * 100,
+               "CAGR%": strat["metrics"]["策略"]["CAGR%"],
+               "Sharpe": strat["metrics"]["策略"]["Sharpe"],
+               "最大回撤%": strat["metrics"]["策略"]["最大回撤%"], "vs系统均仓": "—(基准)"}
+    bench_df = ev.run_benchmarks(price, strat["position"].index, strat["avg_pos"])
+    bench_tab = pd.concat([pd.DataFrame([sys_row]), bench_df], ignore_index=True)
+
+    # ---- 移动块自助 95% CI: 周期分 IC (块长=前瞻窗口) + 本系统档位策略 Sharpe ----
+    ci_rows = []
+    for h in [30, 90, 180, 365]:
+        ic_pt = float(cyc_ic.loc[cyc_ic["窗口"] == f"{h}d", "IC"].iloc[0])
+        lo, hi = ev.ic_bootstrap_ci(cycle, price, h)
+        ci_rows.append({"量": f"周期分 IC ({h}d)", "点估计": ic_pt, "CI下": lo, "CI上": hi})
+    sh_lo, sh_hi = ev.sharpe_bootstrap_ci(strat["daily_ret"])
+    ci_rows.append({"量": "档位策略 Sharpe", "点估计": strat["metrics"]["策略"]["Sharpe"],
+                    "CI下": sh_lo, "CI上": sh_hi})
+    ci_tab = pd.DataFrame(ci_rows)
+
     # ---- 现网决策引擎数据资产: 分档前瞻收益统计 (btc_web 决策面板引用) ----
     def _fwd_to_dict(fwd_df):
         out = {}
@@ -210,6 +229,24 @@ def main():
    ③ MVRV-Z/NUPL/Puell 改为 4 年分位数为主 + 绝对阈值极值保底 (修复周期振幅衰减)。
    本报告为新口径下的重跑结果, 与 2026-06 版报告数字不可直接对比。
 
+## 🎯 证伪对照: 简单基准横比 (先看这个)
+
+各基准仅由价格派生 (200DMA / 减半时钟 / 幂律估值分位 / 恒定均仓), 近乎无参 (200日/18月/
+滚动分位皆约定俗成或无拟合阈值), 与本系统在同一窗口、同"次日生效"口径下对齐。Sharpe/最大回撤
+对恒定杠杆不变, 故风险调整后可直接横比; 平均仓位不同者在末列标注 (绝对收益/回撤幅度会随均仓
+缩放, 但排序不变)。核心问题: **14 因子体系是否显著优于一根 200DMA / 单个幂律估值因子 / 恒定
+均仓?** 若某单因子基准贴身逼近甚至打平整套体系, 那正是最该看到的证伪。
+
+{ev.md_table(bench_tab, floatfmt="{:+.2f}")}
+
+## 统计置信区间 (移动块自助, 95%)
+
+长窗前瞻样本高度重叠 (365d 相邻样本几乎全共享), 名义天数远大于有效独立观测 (365d 仅约 12
+个非重叠年度观测)。移动块自助 (块长=前瞻窗口 h, 保留重叠自相关) 给出诚实 CI —— 通常很宽,
+这本身就是对一个押注净资产大头的工具最该知道的真相: 点估计的不确定度有多大, 是否跨零。
+
+{ev.md_table(ci_tab, floatfmt="{:+.2f}")}
+
 ## 因子覆盖范围
 
 ### 周期分
@@ -235,6 +272,8 @@ def main():
 {ev.md_table(tac_ic)}
 
 ## 周期分档位仓位策略 (次日生效, 无成本)
+
+HODL/恒定50% 为送分弱基准 (Sharpe≈标的本身); 更严格的强基准横比见开头「证伪对照」。
 
 平均仓位 {strat['avg_pos']:.0%} | 累计换手 {strat['turnover']:.1f}x
 
