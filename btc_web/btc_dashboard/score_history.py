@@ -17,6 +17,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Optional
 
+from .version_stamp import config_fingerprint, engine_sha
+
 _HISTORY_FILE = "score_history.json"
 _MAX_ENTRIES = 730  # 最多保留 2 年
 
@@ -142,6 +144,10 @@ def record_score_snapshot(dashboard: dict, cache_dir: str):
         # 记录覆盖率使历史曲线的纵向可比性可核查 (2026-07)
         "cycle_coverage": dashboard.get("cycle_coverage"),
         "tactical_coverage": dashboard.get("tactical_coverage"),
+        # 决策配置身份戳: 记录当日快照由哪套档位/权重/滞回配置产出, 使历史曲线上的
+        # regime-shift 可区分行情 vs 配置漂移 (2026-07); 与 coverage 戳同构。
+        "config_hash": config_fingerprint(),
+        "engine_sha": engine_sha(),
         "scores": scores,
         "statuses": statuses,
     }

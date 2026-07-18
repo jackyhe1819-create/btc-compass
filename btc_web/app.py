@@ -478,8 +478,12 @@ _last_error = None  # 记录最近一次后台错误
 def api_version():
     """部署版本检查"""
     import sys
+    from btc_dashboard.version_stamp import config_fingerprint, engine_sha
+    _engine, _config = engine_sha(), config_fingerprint()
     return jsonify({
-        "version": "compass-v1",
+        "version": f"{_engine}-{_config}",
+        "engine_sha": _engine,
+        "config_hash": _config,
         "server_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC'),
         "python": sys.version,
         "dashboard_ready": _dashboard_cache is not None,
