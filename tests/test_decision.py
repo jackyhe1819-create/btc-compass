@@ -255,11 +255,26 @@ def test_policy_carries_note_and_optional_drawdown():
     assert "max_drawdown_pct" not in decision.apply_position_policy(40, 60, 50, _policy())
 
 
-def test_compute_decision_policy_null_when_shipped_disabled():
-    """仓库内 position_policy.json 出厂 enabled:false → cycle.policy 为 None。"""
-    decision._policy_cache = None  # 清缓存, 强制读真实文件
+def test_compute_decision_policy_null_when_disabled(monkeypatch):
+    """政策未启用 → cycle.policy 为 None (禁用路径, 不依赖仓库文件状态)。"""
+    monkeypatch.setattr(decision, "_load_position_policy", lambda: None)
     out = decision.compute_decision(_dashboard(0.20), _history([0.20] * 60))
     assert out["cycle"]["policy"] is None
+
+
+def test_shipped_policy_file_valid():
+    """仓库内 position_policy.json 必须可解析且配置合法 —
+    enabled:true 时须能产出个人带 (2026-07-18 用户启用: 全范围 0/50/100),
+    enabled:false 时须走禁用直通。防手改 JSON 打坏出厂文件。"""
+    decision._policy_cache = None  # 清缓存, 强制读真实文件
+    p = decision._load_position_policy()
+    out = decision.compute_decision(_dashboard(0.20), _history([0.20] * 60))
+    if p is None:
+        assert out["cycle"]["policy"] is None
+    else:
+        pol = out["cycle"]["policy"]
+        assert pol is not None, "启用状态下配置非法 (floor<=baseline<=ceiling 被破坏?)"
+        assert 0 <= pol["personal_lo"] <= pol["personal_hi"] <= 100
 
 
 def test_compute_decision_policy_overlay_never_touches_targets(monkeypatch):
