@@ -142,8 +142,15 @@ function applyTheme(theme) {
     localStorage.setItem('btc-theme', theme);
 
     // 同步 TradingView K 线图主题
-    if (typeof initTradingViewWidget === 'function') {
-        initTradingViewWidget(theme === 'warm' ? 'light' : 'dark');
+    // tv.js CDN 加载失败时 TradingView 全局缺席, initTradingViewWidget 内部 new TradingView.widget
+    // 会抛 ReferenceError; 若不守卫会从 DOMContentLoaded 首句冒出, 掐死整个看板启动。
+    // 第三方图表单点故障只应跳过图表, 核心面板照常。
+    if (typeof TradingView !== 'undefined' && typeof initTradingViewWidget === 'function') {
+        try {
+            initTradingViewWidget(theme === 'warm' ? 'light' : 'dark');
+        } catch (e) {
+            console.warn('⚠️ TradingView 图表初始化失败, 已跳过:', e);
+        }
     }
 
     // Chart.js 画布颜色在构建时解析，切换主题后重建评分历史与衍生品图表
@@ -240,10 +247,10 @@ async function fetchBuildersData() {
                 : '<span class="builders-badge high">重要</span>';
             const itemsHtml = items.length > 0
                 ? items.map(item => `
-                    <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="builders-item">
-                        <div class="builders-item-title">${item.title}</div>
-                        ${item.summary ? `<div class="builders-item-summary">${item.summary}</div>` : ''}
-                        ${item.date ? `<div class="builders-item-date">${item.date}</div>` : ''}
+                    <a href="${escapeHtml(safeUrl(item.url))}" target="_blank" rel="noopener noreferrer" class="builders-item">
+                        <div class="builders-item-title">${escapeHtml(item.title)}</div>
+                        ${item.summary ? `<div class="builders-item-summary">${escapeHtml(item.summary)}</div>` : ''}
+                        ${item.date ? `<div class="builders-item-date">${escapeHtml(item.date)}</div>` : ''}
                     </a>`).join('')
                 : `<p style="color:var(--text-muted);font-size:0.82rem;padding:8px 0;">${src.error ? '加载失败' : '暂无内容'}</p>`;
 
@@ -308,9 +315,9 @@ function renderBuildersSummary(summary) {
               <div class="bs-section-title">🔥 跨源热议（全社区聚焦）</div>
               <div class="bs-cross-list">
                 ${summary.cross_source_topics.map(t => `
-                  <div class="bs-cross-item" title="${t.sources.join(', ')}">
+                  <div class="bs-cross-item" title="${escapeHtml((t.sources || []).join(', '))}">
                     <span class="bs-cross-icon">${t.icon}</span>
-                    <span class="bs-cross-topic">${t.topic}</span>
+                    <span class="bs-cross-topic">${escapeHtml(t.topic)}</span>
                     <span class="bs-cross-badge">${t.source_count} 源 · ${t.item_count} 条</span>
                   </div>
                 `).join('')}
@@ -327,17 +334,17 @@ function renderBuildersSummary(summary) {
                   <div class="bs-topic-card">
                     <div class="bs-topic-head">
                       <span class="bs-topic-icon">${h.icon}</span>
-                      <span class="bs-topic-name">${h.topic}</span>
+                      <span class="bs-topic-name">${escapeHtml(h.topic)}</span>
                       <span class="bs-topic-count">${h.count} 条</span>
                     </div>
-                    ${h.takeaway ? `<div class="bs-topic-takeaway">${h.takeaway}</div>` : ''}
+                    ${h.takeaway ? `<div class="bs-topic-takeaway">${escapeHtml(h.takeaway)}</div>` : ''}
                     <ul class="bs-topic-items">
                       ${h.items.map(it => `
                         <li>
-                          <a href="${it.url}" target="_blank" rel="noopener noreferrer">
+                          <a href="${escapeHtml(safeUrl(it.url))}" target="_blank" rel="noopener noreferrer">
                             <span class="bs-item-src">${it.source_icon}</span>
-                            <span class="bs-item-title">${it.title}</span>
-                            ${it.date ? `<span class="bs-item-date">${it.date}</span>` : ''}
+                            <span class="bs-item-title">${escapeHtml(it.title)}</span>
+                            ${it.date ? `<span class="bs-item-date">${escapeHtml(it.date)}</span>` : ''}
                           </a>
                         </li>`).join('')}
                     </ul>
@@ -354,7 +361,7 @@ function renderBuildersSummary(summary) {
               <div class="bs-keywords">
                 ${summary.trending_keywords.map(k => {
                   const weight = Math.min(1.2, 0.7 + k.count * 0.05);
-                  return `<span class="bs-kw" style="font-size:${weight}rem;" title="出现 ${k.count} 次">${k.word}<sup>${k.count}</sup></span>`;
+                  return `<span class="bs-kw" style="font-size:${weight}rem;" title="出现 ${k.count} 次">${escapeHtml(k.word)}<sup>${k.count}</sup></span>`;
                 }).join('')}
               </div>
            </div>`
@@ -396,13 +403,14 @@ async function fetchDashboardData(isRetry) {
         onBanner: () => _showComputingBanner(),
         onHideBanner: () => _hideComputingBanner(),
         onTimeout: () => {
-            showError('指标加载超时，请手动刷新页面');
+            // 先停 spinner 再显示错误，防错误路径任何异常导致 spinner 永转
             if (refreshBtn) refreshBtn.classList.remove('spinning');
+            showError('指标加载超时，请手动刷新页面');
         },
         onError: (err) => {
             console.error('Error fetching dashboard data:', err);
-            showError(typeof err === 'string' ? err : '无法连接到服务器');
             if (refreshBtn) refreshBtn.classList.remove('spinning');
+            showError(typeof err === 'string' ? err : '无法连接到服务器');
         },
     });
 
@@ -1726,18 +1734,21 @@ function formatNumber(num) {
 
 /**
  * 显示错误信息
+ * 复用 _showComputingBanner 的固定顶栏模式（红底），不再依赖已删除的 #loading 区块，
+ * 保证任何错误路径都能显示且不抛异常（历史上 getElementById('loading') 返回 null 会 TypeError
+ * 击穿回调，令 spinner 永转、页面停在骨架屏）。用 textContent 落地上游文案，避免 XSS。
  */
 function showError(message) {
-    const mainContent = document.getElementById('mainContent');
-    const loadingEl = document.getElementById('loading');
-
-    loadingEl.innerHTML = `
-        <div class="error">
-            <h2>❌ 错误</h2>
-            <p>${message}</p>
-            <p style="margin-top: 20px; color: var(--text-muted);">请点击右下角按钮重试</p>
-        </div>
-    `;
+    let banner = document.getElementById('errorBanner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'errorBanner';
+        banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:rgba(220,53,69,0.94);color:#fff;text-align:center;padding:10px;font-size:0.9rem;font-weight:500;cursor:pointer;';
+        banner.title = '点击关闭';
+        banner.addEventListener('click', () => banner.remove());
+        document.body.prepend(banner);
+    }
+    banner.textContent = `❌ ${message} · 请点击右下角按钮重试`;
 }
 
 /**
@@ -1800,10 +1811,10 @@ function renderCryptoNews(news) {
         return `<div class="news-flash-item${summary ? ' has-summary' : ''}">
             <div class="news-flash-head">
                 <span class="news-flash-bolt">⚡</span>
-                <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="news-flash-title">
-                    ${item.title}
+                <a href="${escapeHtml(safeUrl(item.url))}" target="_blank" rel="noopener noreferrer" class="news-flash-title">
+                    ${escapeHtml(item.title)}
                 </a>
-                <span class="news-flash-time">${item.time}</span>
+                <span class="news-flash-time">${escapeHtml(item.time)}</span>
             </div>
             ${summary ? `<div class="news-flash-summary"><div class="news-flash-summary-inner">${summary}</div></div>` : ''}
         </div>`;
@@ -2027,8 +2038,8 @@ function renderMacroCalendar(events) {
         // 特殊处理 "链接" 类型
         if (item.type === '链接') {
             return `
-            <a href="${item.url}" target="_blank" class="calendar-item" style="display: block; text-decoration: none; margin-bottom: 10px; padding: 10px; background: var(--bg-glass); border-radius: 8px; text-align: center; color: var(--accent-btc);">
-                ${item.event}
+            <a href="${escapeHtml(safeUrl(item.url))}" target="_blank" class="calendar-item" style="display: block; text-decoration: none; margin-bottom: 10px; padding: 10px; background: var(--bg-glass); border-radius: 8px; text-align: center; color: var(--accent-btc);">
+                ${escapeHtml(item.event)}
             </a>
             `;
         }
@@ -2038,9 +2049,9 @@ function renderMacroCalendar(events) {
         const hasActual = item.has_actual;
         const isPast = item.is_past;
         const eventStatus = item.event_status || '';
-        const actual = item.actual || '';
-        const forecast = item.forecast || '';
-        const previous = item.previous || '';
+        const actual = escapeHtml(item.actual || '');
+        const forecast = escapeHtml(item.forecast || '');
+        const previous = escapeHtml(item.previous || '');
 
         // 状态徽章样式
         let statusBadge = '';
@@ -2092,7 +2103,7 @@ function renderMacroCalendar(events) {
         <div class="calendar-item" style="margin-bottom: 8px; padding: 10px; background: var(--bg-glass); border-radius: 8px; border-left: 3px solid ${color}; opacity: ${opacity};">
             <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                 <div style="color: var(--text-primary); font-weight: 500; font-size: 0.9rem; flex: 1; display: flex; align-items: center; flex-wrap: wrap;">
-                    ${item.event || item.title || '未知事件'}
+                    ${escapeHtml(item.event || item.title || '未知事件')}
                     ${statusBadge}
                 </div>
                 <span style="font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: ${color}22; color: ${color}; white-space: nowrap; margin-left: 8px;">
@@ -2802,11 +2813,17 @@ function renderOptionsCard(a) {
    BTC 概率分布（期权隐含风险中性密度）
    ============================================================ */
 
-// HTML 转义：外部字符串（如 Polymarket 市场标题）拼进 innerHTML 前必须过一遍，防 XSS
+// HTML 转义：外部字符串（如 Polymarket 市场标题、新闻/RSS 标题、宏观事件名）拼进 innerHTML 前必须过一遍，防 XSS
 function escapeHtml(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
         { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
+}
+
+// 链接白名单：只放行 http(s)，挡掉 javascript:/data: 等 href 注入向量；非法值回退为无跳转的 '#'
+function safeUrl(u) {
+    const s = String(u == null ? '' : u).trim();
+    return /^https?:\/\//i.test(s) ? s : '#';
 }
 
 async function renderProbDist() {
