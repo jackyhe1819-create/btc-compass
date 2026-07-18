@@ -42,6 +42,15 @@ HYST_CONFIRM = 5
 COVERAGE_WARN_THRESHOLD = 0.5             # 因子级覆盖率警示/存疑阈值
 MIN_RELIABLE_HISTORY = HYST_CONFIRM * 4   # 滞回可信最小历史深度 (=20)
 
+# 冷启动重建噪声尺度 — Render free 无持久盘, 每次冷启动由 backfill 重建评分历史;
+# 重建时链上慢变量受 bitcoin-data.com 匿名限流 (10 请求/h) 影响可得性, 实测使周期分
+# 产生 ±0.01 量级抖动。REBUILD_NOISE=0.02 (≈2× 实测单侧噪声) 作"换档临界带"半宽:
+# 当前分数距任一 δ 偏移换档触发线 < 此值时, 不同冷启动重建可能落在触发线两侧、翻转
+# 生效档位。案例 2026-07-18: 周期分近两周贴 减配上移触发线 0.00+δ=0.05 擦边 (07-15 差
+# 0.001), 生效档在 减配↔中性观望 间随重建来回摆 — 据此加临界带诚实提示 (不改仓位数学)。
+# 与 confidence 分级同源 (tests/test_consistency.py 锁死"临界带警示阈值 == 置信闸门阈值")。
+REBUILD_NOISE = 0.02
+
 # 回填保证的最小历史深度 — app.py/backfill.py 引用此常量, 确保滞回重放窗口喂满
 REPLAY_DAYS = 365
 
@@ -247,6 +256,16 @@ def _band_bounds(idx: int):
     return lo, hi
 
 
+def _switch_trigger_lines(idx: int):
+    """档位 idx 的 δ 偏移换档触发线 (下移触发线, 上移触发线) —— 与 replay_hysteresis
+    的 lo_x/hi_x 严格同源: 分数须越过 lo-δ 才可能下移换档、越过 hi+δ 才可能上移换档。
+    含 ±inf 边界的一侧无触发线 (replay 里 s<-inf / s>=inf 恒不成立), 返回 None。"""
+    lo, hi = _band_bounds(idx)
+    lo_line = lo - HYST_DELTA if lo != float("-inf") else None
+    hi_line = hi + HYST_DELTA if hi != float("inf") else None
+    return lo_line, hi_line
+
+
 def replay_hysteresis(scores: List[float]):
     """
     对逐日周期分序列重放滞回规则。
@@ -406,6 +425,27 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
     if cov_t_low:
         warnings.append(f"战术分因子覆盖率仅 {cov_t:.0%}, 节奏建议可信度低")
 
+    # ── 换档临界带诚实提示 (2026-07-18): 冷启动重建噪声可翻转生效档位 ──
+    # 两条命中路径, 均按 replay_hysteresis 的 lo_x/hi_x 真实语义算距离:
+    #  (a) 当前分数距 held 档任一 δ 偏移换档触发线 < REBUILD_NOISE — 稳态贴线;
+    #  (b) pending 确认中且确认窗口 (末 pend_days 条快照) 内任一天分数距其确认线 <
+    #      REBUILD_NOISE — 该天是否计入连击确认可被 ±0.01 重建噪声翻转。
+    # 命中即如实追加警示并把 confidence 至少降为存疑; 绝不改仓位/档位数学。
+    lo_line, hi_line = _switch_trigger_lines(held_idx)
+    crit_dists = [abs(cycle_score - ln) for ln in (lo_line, hi_line) if ln is not None]
+    if pending_idx is not None and pending_idx != held_idx and pend_days > 0:
+        # pending 在更低档 (idx 更大) → 越过下移线; 更高档 → 越过上移线
+        confirm_line = lo_line if pending_idx > held_idx else hi_line
+        if confirm_line is not None:
+            crit_dists.append(min(abs(s - confirm_line)
+                                  for s in hist_scores[-pend_days:]))
+    near_line_dist = min(crit_dists) if crit_dists else None
+    in_boundary_zone = near_line_dist is not None and near_line_dist < REBUILD_NOISE
+    if in_boundary_zone:
+        warnings.append(
+            f"处于换档临界带: 分数距确认线仅 {near_line_dist:.3f} "
+            f"(重建噪声 ±0.01 量级), 冷启动重建后生效档位可能不同")
+
     # ── 冻结态 (2026-07): 仅"价格层失效"锁死为一等状态 —— 合成价格 (全源失效) 或
     # 价格全源陈旧 (>7天)。价格是滚动均线/分位数的地基, 地基坏则仓位数学无意义,
     # 前端据此把可执行数字置灰、notify 据此堵住陈旧误推送 (见 notify.evaluate_alerts)。
@@ -419,12 +459,13 @@ def compute_decision(dashboard: dict, history_entries: list) -> dict:
     frozen = bool(freeze_reasons)
 
     # ── 置信分级 (三档, 无连续标量): 严格复用上面数据质量警示的同源阈值与文案。
-    # 合成数据→不可靠; 覆盖率/历史缺陷叠加 (≥2) →不可靠, 单一缺陷→存疑; 否则可靠。
-    # (价格陈旧走上面的 frozen 硬状态, 不并入此软分级。)
+    # 合成数据→不可靠; 覆盖率/历史缺陷叠加 (≥2) →不可靠, 单一缺陷/换档临界带→存疑;
+    # 否则可靠。(价格陈旧走上面的 frozen 硬状态, 不并入此软分级。)
+    # 换档临界带命中把置信至少降为存疑 — 生效档位对冷启动重建噪声敏感即"存疑"。
     defect_count = sum([cov_c_low or cov_t_low, history_short])
     if synthetic or defect_count >= 2:
         conf_level = "不可靠"
-    elif defect_count >= 1:
+    elif defect_count >= 1 or in_boundary_zone:
         conf_level = "存疑"
     else:
         conf_level = "可靠"

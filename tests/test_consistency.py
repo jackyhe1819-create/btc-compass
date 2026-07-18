@@ -281,6 +281,42 @@ def test_confidence_history_gate_shares_warning_threshold():
     assert below["confidence"]["level"] != "可靠"
 
 
+def _tail_hist(score):
+    """长期 -0.05 (锁生效档于减配) + 尾部 3 条 score (贴上移触发线不换档)。"""
+    scores = [-0.05] * 30 + [score] * 3
+    return [{"date": f"d{i}", "total_score": s} for i, s in enumerate(scores)]
+
+
+def test_confidence_boundary_gate_shares_rebuild_noise_threshold():
+    """换档临界带警示与 confidence 分级共用 decision.REBUILD_NOISE (同源锁, 只加不改)。
+
+    构造生效档锁死在减配 (长期 -0.05)、尾部分数贴其上移换档触发线 (0.00+δ=0.05, 即
+    07-15 案例) 的历史; 分数距触发线在 REBUILD_NOISE 内外各取一点, 证"临界带警示触发
+    ⇔ 置信降级"由同一常量驱动 —— 任一处改读别的阈值 (警示改、置信仍读旧值) 本锁必红。
+    """
+    noise = decision.REBUILD_NOISE
+    trigger = 0.00 + decision.HYST_DELTA  # 减配上移换档触发线 = 0.05
+
+    outside = trigger - noise * 1.5  # 距触发线 1.5×noise > noise → 不触发
+    out_dec = decision.compute_decision(
+        _base_dash(total_score=outside), _tail_hist(outside))
+    assert out_dec["cycle"]["band"] == "减配", "构造前提: 生效档须锁在减配"
+    assert not any("换档临界带" in w for w in out_dec["warnings"]), \
+        "距触发线 > REBUILD_NOISE 不应触发临界带"
+    assert out_dec["confidence"]["level"] == "可靠", "未触发临界带时置信须可靠 (同源)"
+
+    inside = trigger - noise * 0.5  # 距触发线 0.5×noise < noise → 触发
+    in_dec = decision.compute_decision(
+        _base_dash(total_score=inside), _tail_hist(inside))
+    assert in_dec["cycle"]["band"] == "减配"
+    assert any("换档临界带" in w for w in in_dec["warnings"]), \
+        "距触发线 < REBUILD_NOISE 须触发临界带警示"
+    assert in_dec["confidence"]["level"] != "可靠", \
+        "临界带触发时置信不得仍可靠 (阈值漂移)"
+    assert any("换档临界带" in r for r in in_dec["confidence"]["reasons"]), \
+        "临界带原因须进 confidence.reasons (与警示同源)"
+
+
 def test_frozen_gate_matches_price_layer_and_suppresses_notify():
     """frozen 判据只锁价格层 (data_synthetic / price_stale), 且 notify 据 frozen 抑制误推送。"""
     for kw, reason_kw in ((dict(data_synthetic=True), "演示"),

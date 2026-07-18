@@ -433,3 +433,87 @@ def test_policy_band_override_never_touches_targets():
     out = decision.compute_decision(_dashboard(0.20), _history([0.20] * 60))
     c = out["cycle"]
     assert (c["target_lo"], c["target_hi"], c["target_mid"]) == (40, 60, 50)
+
+
+# ════════════════════════════════════════════════════════════
+# 换档临界带诚实提示 (2026-07-18) — 冷启动重建噪声可翻转生效档位
+# 分数贴 δ 偏移换档触发线 (REBUILD_NOISE 半宽) 时如实提示 + confidence 至少存疑
+# ════════════════════════════════════════════════════════════
+
+# 减配档 [-0.12, 0.00) 的上移换档触发线 = 0.00+δ = 0.05 (07-15 案例贴的就是这条线)。
+# 长期 -0.05 把生效档锁死在减配, 尾部升到贴线但不越 hi_x=0.05 → 不换档、仍显示减配。
+def _dipei_tail(score, days=3):
+    return [-0.05] * 30 + [score] * days
+
+
+def test_boundary_zone_flags_near_confirm_line():
+    """07-15 复现: 生效档减配, 分数升到 0.049 距上移触发线 0.05 仅 0.001 —
+    冷启动重建噪声 (±0.01) 可翻转生效档位, 须进临界带警示 + confidence 至少存疑。"""
+    out = decision.compute_decision(_dashboard(0.049), _history(_dipei_tail(0.049)))
+    c = out["cycle"]
+    assert c["band"] == "减配"          # 滞回维持在减配 (未越 0.05)
+    assert c["raw_band"] == "中性观望"  # 原始档已抬升
+    assert c["raw_differs"] is True
+    hit = [w for w in out["warnings"] if "换档临界带" in w]
+    assert hit and "0.001" in hit[0]
+    assert out["confidence"]["level"] == "存疑"
+    assert any("换档临界带" in r for r in out["confidence"]["reasons"])
+
+
+def test_boundary_zone_flags_marginal_day_in_pending_window():
+    """pending 确认窗口内某天分数贴确认线 (即便今日分数已远离触发线): 该天是否计入
+    连击确认可被重建噪声翻转 → 命中临界带。隔离 (b) pending-window 检查支路。"""
+    # 生效档标准配置; 首日 0.099 距下移线 0.10 仅 0.001, 次日 0.05 已远离 (距 0.10=0.05)
+    hist = [0.20] * 30 + [0.099, 0.05]
+    out = decision.compute_decision(_dashboard(0.05), _history(hist))
+    c = out["cycle"]
+    assert c["band"] == "标准配置"                       # 2<5 确认未满, 滞回维持
+    assert c["pending"] and c["pending"]["direction"] == "下调"
+    assert any("换档临界带" in w for w in out["warnings"])
+    assert out["confidence"]["level"] == "存疑"
+
+
+def test_boundary_zone_no_false_alarm_in_steady_state():
+    """稳态 0.20 (距最近触发线 0.10 ≫ REBUILD_NOISE): 不得误报临界带、confidence 仍可靠。"""
+    out = decision.compute_decision(_dashboard(0.20), _history([0.20] * 60))
+    assert not any("换档临界带" in w for w in out["warnings"])
+    assert out["confidence"]["level"] == "可靠"
+
+
+def test_boundary_zone_no_false_alarm_mid_band():
+    """减配档中部 (score=-0.06, 距上移线 0.05 与下移线 -0.17 均远): 不触发临界带。"""
+    out = decision.compute_decision(_dashboard(-0.06), _history([-0.06] * 60))
+    assert out["cycle"]["band"] == "减配"
+    assert not any("换档临界带" in w for w in out["warnings"])
+    assert out["confidence"]["level"] == "可靠"
+
+
+def test_boundary_zone_does_not_alter_targets_or_policy(monkeypatch):
+    """临界带命中只加 warning / 降 confidence — target/frozen/policy 字段不受影响。"""
+    monkeypatch.setattr(decision, "_load_position_policy",
+                        lambda: _policy(baseline=80, floor=60, ceiling=95))
+    out = decision.compute_decision(_dashboard(0.049), _history(_dipei_tail(0.049)))
+    c = out["cycle"]
+    assert any("换档临界带" in w for w in out["warnings"])  # 命中
+    # 但档位仓位数学不受影响 (减配档标准区间 15-30-22)
+    assert c["band"] == "减配"
+    assert (c["target_lo"], c["target_hi"], c["target_mid"]) == (15, 30, 22)
+    assert c["action_type"] == "hold"
+    # frozen 不因临界带升起 (价格层正常)
+    assert out["frozen"] is False and out["freeze_reasons"] == []
+    # policy overlay 照常产出且在区间内
+    assert c["policy"] is not None
+    assert 60 <= c["policy"]["personal_lo"] <= c["policy"]["personal_hi"] <= 95
+
+
+def test_boundary_zone_coexists_with_frozen_targets_intact():
+    """价格陈旧冻结 + 临界带并存: frozen 硬状态与临界带 warning 共存, target 不被改,
+    confidence 仍走临界带 (price_stale 不并入软分级) → 存疑。"""
+    dash = _dashboard(0.049)
+    dash["price_stale"] = True
+    out = decision.compute_decision(dash, _history(_dipei_tail(0.049)))
+    c = out["cycle"]
+    assert out["frozen"] is True and any("陈旧" in r for r in out["freeze_reasons"])
+    assert any("换档临界带" in w for w in out["warnings"])
+    assert (c["target_lo"], c["target_hi"], c["target_mid"]) == (15, 30, 22)
+    assert out["confidence"]["level"] == "存疑"
