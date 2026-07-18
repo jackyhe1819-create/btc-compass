@@ -165,6 +165,14 @@ def calc_stablecoin_growth() -> IndicatorResult:
     稳定币供应 30 日增速 — 加密市场的"场内弹药"与流动性代理
     增速为正 = 新资金流入加密生态, 为负 = 资金撤离
     """
+    def _unavailable(method: str) -> IndicatorResult:
+        return IndicatorResult(
+            name="稳定币增速", value=float('nan'), score=0, color="⚪",
+            status="数据源暂不可用", priority="P1",
+            url="https://defillama.com/stablecoins",
+            description="稳定币总市值 30 日增速，衡量场内资金弹药变化。",
+            method=method)
+
     series = None
     try:
         r = requests.get("https://stablecoins.llama.fi/stablecoincharts/all",
@@ -178,17 +186,17 @@ def calc_stablecoin_growth() -> IndicatorResult:
         print(f"⚠️ DefiLlama 稳定币数据失败: {e}")
 
     if not series or len(series) < 35:
-        return IndicatorResult(
-            name="稳定币增速", value=float('nan'), score=0, color="⚪",
-            status="数据源暂不可用", priority="P1",
-            url="https://defillama.com/stablecoins",
-            description="稳定币总市值 30 日增速，衡量场内资金弹药变化。",
-            method="数据源 DefiLlama 暂不可用。")
+        return _unavailable("数据源 DefiLlama 暂不可用。")
 
     series.sort(key=lambda x: x[0])
     latest = series[-1][1]
     prev_30d = series[-31][1]
-    growth_pct = (latest / prev_30d - 1) * 100 if prev_30d > 0 else 0.0
+    # 上游半写入/结构变化会把 peggedUSD 缺失字段静默填 0: 若最新或 30 日前的锚点
+    # <=0, 会伪造 -100% 增速(latest=0)或伪装"常态区间"(prev=0, 旧 else 0.0)的假信号
+    # 直接计入资金流桶. 任一锚点非正 → 如实缺席(转灰), 与"数据坏→退出评分"不变量一致.
+    if not (latest > 0 and prev_30d > 0):
+        return _unavailable("DefiLlama 数据结构异常 (锚点非正值), 稳定币增速暂不可用。")
+    growth_pct = (latest / prev_30d - 1) * 100
     total_b = latest / 1e9
 
     # 2026-07 对抗性审查重标定: 稳定币市值有结构性增长趋势 (2021+ 30日增速中位
