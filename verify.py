@@ -40,6 +40,13 @@ PROBE_RETRY_WAIT = 20  # 秒
 FRESH_WARN_S = 2 * 3600
 FRESH_FAIL_S = 24 * 3600
 
+# 期权/概率分布面板 SWR TTL = 600s (app.py OPTIONS_PANEL/PROBDIST_PANEL)。
+# partial 守卫会保留旧完整缓存, 关键字段齐全 → 原探针只看字段死活会误判"存活";
+# 时间戳解耦后 cache_age_s 如实增长, 超过 TTL 数倍即上游持续断供的信号 —— 补上
+# 探针盲区, 让"长期断供却亮绿灯"(旧数据被当新鲜展示)可被巡检发现。
+PANEL_TTL_S = 600
+PANEL_STALE_WARN_MULT = 6   # age > 6×TTL (1h) 未成功全量刷新 → 上游疑似持续断供
+
 # 覆盖率阈值: 与 scoring/decision 的 0.5 警戒线之上留缓冲, 早于用户发现劣化
 COVERAGE_WARN = 0.85
 COVERAGE_FAIL = 0.5
@@ -376,6 +383,14 @@ def probe_runtime(base_url) -> None:
             _report("WARN", f"{label}关键字段缺失/为空: {', '.join(dead)}")
         else:
             _report("OK", f"{label}存活 ({', '.join(req_keys)})")
+        # 年龄闸门 (探针盲区补丁): partial 守卫保留旧完整缓存 → 关键字段齐全, 上面照报"存活",
+        # 但 cache_age_s 若已达 TTL 数倍, 说明上游长期断供、旧数据被当新鲜展示。字段死活探针
+        # 对此完全失明, 唯有比对如实年龄才能揪出"长期断供却亮绿灯"。
+        p_age = d.get("cache_age_s")
+        if p_age is not None and p_age > PANEL_TTL_S * PANEL_STALE_WARN_MULT:
+            _report("WARN", f"{label}已 {p_age / 3600:.1f}h 未成功全量刷新 "
+                            f"(>{PANEL_STALE_WARN_MULT}×TTL={PANEL_TTL_S}s) — 上游疑似持续断供, "
+                            f"旧数据可能被当新鲜展示")
 
     # 规律版块三端点 (2026-07 审查: 曾在全部质量闸门零覆盖, 端点挂了没人知道)
     # 展示卡性质: 只 WARN 不翻退出码; 额外做策展资产年龄 + 相位翻页过期检测
